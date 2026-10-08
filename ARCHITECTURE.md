@@ -6,7 +6,7 @@ Document de travail mis à jour le 8 octobre 2026, basé sur notre discussion et
 
 Ce document décrit la structure visée et sert à comprendre où placer chaque responsabilité. Les noms des fonctions proposées pourront être ajustés ensemble avant leur implémentation. Leur présence ici ne signifie pas que le code existe déjà ni que toutes les décisions sont prises.
 
-**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont provisoires : la navigation est implémentée, mais les mises, le déroulement du jeu et la persistance restent à construire. `Card`, `Hand` et `Shoe` sont maintenant implémentés dans le package `model`, sans branchement aux écrans. Les vérifications figurent à la section 9. Les autres classes ci-dessous restent à construire; leurs packages sont documentés par des README.
+**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont provisoires : la navigation est implémentée, mais le branchement du jeu à l'interface, les mises et la persistance restent à construire. `Card`, `Hand`, `Shoe` et la partie standard de `BlackjackGame` sont implémentés dans le package `model`, sans branchement aux écrans. Room 3.0.3 est ajouté et les trois Entity `GameEntity`, `HandEntity` et `DrawnCardEntity` sont définies. Le DAO, la base et le repository restent à créer. Les vérifications figurent à la section 9.
 
 `HomeScreen` est conservé conformément à ton choix et se trouve maintenant dans `ui/screens/home`. La navigation a été extraite dans `ui/navigation/BlackjackNavHost.kt`.
 
@@ -56,6 +56,7 @@ com.example.blackjack
     ├── dao/BlackjackDao.kt
     └── entity
         ├── GameEntity.kt
+        ├── HandEntity.kt
         └── DrawnCardEntity.kt
 ```
 
@@ -363,19 +364,66 @@ le nombre de copies de chaque rang/couleur dans plusieurs paquets.
 
 **Rôle :** appliquer les règles métier et gérer les phases de la partie : distribution, tour du joueur, tour du croupier et résultat.
 
-| Fonction prévue | À quoi elle sert |
+| Fonction — état précisé ci-dessous | À quoi elle sert |
 | --- | --- |
 | `validateBet(amount, availableChips)` | Vérifier la mise selon les limites retenues et les jetons disponibles. |
-| `startRound(bet)` | Initialiser les mains, distribuer les cartes et vérifier les situations de départ. |
+| `startRound()` | Initialiser les mains, distribuer les cartes et vérifier les situations de départ. La mise sera ajoutée lors de l'étape des jetons. |
 | `hit()` | Ajouter une carte à la main active et traiter un éventuel dépassement. |
 | `stand()` | Terminer la main active et passer à la suite de la partie. |
 | `canSplit()` | Vérifier l'admissibilité du Split et la disponibilité des jetons nécessaires. |
 | `split()` | Séparer les cartes, répartir les mises et organiser les tours des mains. |
 | `playDealerTurn()` — interne | Faire jouer le croupier selon la règle de 17, lorsque les tours du joueur sont terminés. |
-| `determineResults()` — interne | Comparer les mains admissibles au croupier et produire victoire, défaite ou égalité. |
+| `determineResult()` — interne | Comparer la main du joueur au croupier et produire victoire, défaite ou égalité. Le traitement de plusieurs mains viendra avec le Split. |
 | `calculateChipChange()` — interne | Calculer la variation des jetons selon les résultats et le traitement des mises retenu. |
 
 Les noms sont des propositions : nous éviterons de créer plusieurs fonctions qui appliquent deux fois la même règle. Les fonctions internes ne seront pas exposées à l'écran si elles ne correspondent pas à une action utilisateur.
+
+**État actuel — option B choisie le 8 octobre 2026 :** `startRound()`,
+`hit()`, `stand()`, `playDealerTurn()` et `determineResult()` sont
+implémentées pour une seule main, sans mises ni Split. Les fonctions de
+validation de mise, de Split et de calcul des jetons restent prévues.
+
+Le constructeur public reçoit un `Shoe` existant. Le constructeur
+`internal` reçoit une fonction `() -> Card?`, sans paramètre, qui renvoie
+une carte ou `null`. Les tests lui fournissent un ordre fixe; le
+constructeur public lui transmet un appel à `shoe.drawCard()`. Aucune
+bibliothèque de simulation ni modification du sabot n'est nécessaire.
+
+Les `enum class` `GamePhase` et `GameResult`, dans ce même fichier,
+décrivent respectivement la phase (`READY`, `PLAYER_TURN`, `DEALER_TURN`,
+`FINISHED`, `INTERRUPTED`) et le résultat (`WIN`, `LOSS`, `DRAW`).
+Le résultat vaut `null` avant le règlement ou en cas d'interruption.
+`private set` empêche le code extérieur de remplacer ces valeurs.
+Les mains restent privées; les listes exposées sont des copies et les
+totaux sont calculés par `Hand`.
+
+Règles de ce bloc :
+
+- distribution alternée : joueur, croupier, joueur, croupier;
+- Blackjack naturel reconnu uniquement dans les deux cartes initiales;
+  deux Blackjacks donnent une égalité, sinon le détenteur gagne immédiatement;
+- dépasser 21 termine la partie en défaite, sans faire tirer le croupier;
+- atteindre 21 en tirant déclenche le tour du croupier, sans transformer
+  ce total en Blackjack naturel;
+- le croupier tire sous 17 et s'arrête sur tout total de 17 ou plus,
+  y compris As + 6, conformément au critère PB-07 du backlog;
+- croupier au-dessus de 21 : victoire; sinon comparaison des totaux;
+- si une carte manque, la partie passe à `INTERRUPTED`, sans résultat et
+  sans renouvellement du sabot, selon l'option A choisie;
+- une distribution interrompue peut conserver les cartes déjà tirées;
+  elles restent retirées du sabot et aucun résultat partiel n'est attribué.
+
+Les actions renvoient `true` si elles aboutissent, `false` si elles sont
+refusées ou interrompues. Une action interrompue peut déjà avoir distribué
+des cartes : `false` ne signifie donc pas une annulation des tirages.
+`canHit` et `canStand` sont vrais uniquement pendant le tour du joueur.
+`startRound()` refuse de remplacer une partie en cours; après une fin ou
+une interruption, il remet les mains à zéro en conservant la même source
+de cartes. Le nombre de paquets reste choisi par l'appelant.
+
+Le modèle conserve les cartes complètes du croupier pour calculer les
+résultats. Le masquage de sa deuxième carte devra être appliqué dans
+l'état destiné à l'interface lors du branchement du jeu.
 
 **Ce fichier ne contient pas de SQL.** Il produit le résultat du jeu; le ViewModel demande ensuite sa sauvegarde au repository.
 
@@ -394,7 +442,7 @@ Les noms sont des propositions : nous éviterons de créer plusieurs fonctions q
 
 Le repository ne remplace pas le moteur de jeu et ne décide pas qu'un As vaut 1. Il pourra contenir de petites conversions privées entre résultat métier et Entity, uniquement lorsqu'elles seront nécessaires.
 
-La sauvegarde doit être **atomique** : on enregistre la partie et ses cartes ensemble, ou rien. Une transaction au niveau du DAO permet d'éviter une partie enregistrée avec la moitié de ses cartes.
+La sauvegarde doit être **atomique** : on enregistre la partie, ses mains et ses cartes ensemble, ou rien. Une transaction au niveau du DAO permet d'éviter une partie enregistrée avec la moitié de ses cartes.
 
 ## 6. Package database : Room et SQLite
 
@@ -416,7 +464,7 @@ La sauvegarde doit être **atomique** : on enregistre la partie et ses cartes en
 | `@Database` | Déclare la base, ses Entity et sa version. |
 | Migration | Décrit comment faire évoluer les tables sans perdre les données existantes. |
 
-Ces notions suivent la [documentation Android sur Room](https://developer.android.com/training/data-storage/room). La version de Room et ses dépendances seront choisies séparément avant leur installation.
+Ces notions suivent la [documentation Android sur Room](https://developer.android.com/training/data-storage/room). Room 3.0.3 est choisi et autorisé le 8 octobre 2026, comme dans `Atelier3`. La dépendance `androidx.room3:room3-runtime:3.0.3` fournit les annotations nécessaires aux Entity. Le compilateur Room et KSP seront ajoutés lors de la création de la base et du DAO, lorsqu'ils deviendront nécessaires. [Versions officielles de Room 3](https://developer.android.com/jetpack/androidx/releases/room3).
 
 ### database/BlackjackDatabase.kt
 
@@ -437,8 +485,9 @@ L'instance sera créée et conservée par `BlackjackApplication`. On évite deux
 | Fonction prévue | À quoi elle sert |
 | --- | --- |
 | `insertGame(game)` — `suspend` | Insérer le résumé d'une partie et obtenir son identifiant. |
+| `insertHands(hands)` — `suspend` | Insérer les mains du joueur avec l'identifiant de leur partie. |
 | `insertDrawnCards(cards)` — `suspend` | Insérer les cartes avec l'identifiant de leur partie. |
-| `insertGameWithCards(...)` — transaction `suspend` | Coordonner les deux insertions comme une sauvegarde unique. |
+| `insertGameWithCards(...)` — transaction `suspend`, nom provisoire | Coordonner l'insertion de la partie, puis de ses mains, puis de ses cartes comme une sauvegarde unique. |
 | `observeHistory()` — `Flow` | Lire les parties dans l'ordre retenu et publier les changements. |
 | `getDrawnCards(gameId)` — `suspend`, selon le besoin | Lire les cartes associées à une partie dans leur ordre enregistré. |
 | `observeStatistics()` — `Flow`, nom provisoire | Calculer les agrégats SQLite demandés. Plusieurs requêtes pourront être nécessaires selon l'énoncé. |
@@ -451,23 +500,75 @@ Une lecture observable retourne un `Flow`; une écriture ponctuelle utilise une 
 
 **Rôle :** décrire comment le résumé d'une partie est enregistré dans la base. Ce n'est pas le moteur `BlackjackGame`.
 
-Ce fichier contiendra principalement des propriétés, pas des fonctions de jeu.
+**État actuel :** cette `data class` est annotée `@Entity(tableName = "games")`.
+Chaque objet décrit une ligne de la future table `games`, sans fonction de jeu.
 
-**Données envisagées, à valider avant le schéma :** identifiant, date, mise, résultat et variation des jetons. Les totaux utiles et la représentation des résultats d'un Split dépendront des exigences.
+| Propriété | Donnée conservée |
+| --- | --- |
+| `id: Long` | Clé primaire générée par Room lors d'une future insertion; 0 avant insertion. |
+| `playedAt: Long` | Date en millisecondes depuis le 1er janvier 1970. |
+| `initialBet: Int` | Mise de départ. |
+| `totalBet: Int` | Total des mises, y compris la seconde main après un Split. |
+| `result: String` | Résultat résumé de la partie; la convention pour des résultats différents après Split reste à choisir. |
+| `chipChange: Double` | Variation totale des jetons, pouvant contenir une moitié de jeton sans décider du paiement. |
+| `dealerTotal: Int` | Total final du croupier. |
 
-Pour une partie séparée en plusieurs mains, une seule valeur « résultat » peut être insuffisante : une main peut gagner et l'autre perdre. La relation entre une partie, ses mains et leurs mises devra être décidée avant d'implémenter les tables.
+L'option A à trois tables est choisie le 8 octobre 2026. Une partie reste
+une seule ligne même après Split; les résultats détaillés appartiennent
+à `HandEntity`. Le repository devra assurer la cohérence entre résumé,
+totaux et détails lorsqu'il sera implémenté.
 
 **Différence essentielle :** `BlackjackGame` applique les règles en mémoire; `GameEntity` décrit les données conservées. Enregistrer un résumé final ne suffit pas à permettre la reprise d'une partie interrompue. Cette reprise n'est pas ajoutée implicitement au périmètre.
+
+### database/entity/HandEntity.kt
+
+**Rôle :** conserver la mise et le résultat de chaque main du joueur,
+avec une ligne pour une partie standard et deux lignes après un Split.
+La table est nommée `hands`.
+
+La clé primaire est **composée** de `gameId` et `handNumber` : la main 1
+de la partie 12 est différente de la main 1 de la partie 13. Cette paire
+évite aussi d'enregistrer deux fois la même main d'une partie.
+La clé étrangère `gameId` référence `GameEntity.id`.
+
+Les autres colonnes sont `bet: Int`, `total: Int`, `result: String`
+(`WIN`, `LOSS` ou `DRAW`), `isNaturalBlackjack: Boolean` et
+`chipChange: Double`. Le numéro est 1 pour la première main et 2 pour
+la seconde après Split; les règles du Split ne sont pas implémentées
+par cette Entity. La clé primaire composée commence par `gameId` et
+fournit l'index utilisé pour retrouver les mains d'une partie.
 
 ### database/entity/DrawnCardEntity.kt
 
 **Rôle :** décrire une carte distribuée et son contexte d'enregistrement.
 
-Ce fichier contiendra principalement des propriétés.
+**État actuel :** la table déclarée est `drawn_cards`. Chaque objet
+contient `id: Long` généré lors de l'insertion, `gameId: Long`,
+`handNumber: Int?`, `rank: String`, `suit: String` et `drawOrder: Int`.
+Les noms anglais de `Rank` et `Suit` seront utilisés, comme `ACE`
+et `HEARTS`, sans dépendre de la langue de l'interface.
 
-**Données envisagées, à valider :** identifiant, `gameId`, rang, couleur, destinataire joueur/croupier, main concernée après Split et ordre de distribution. Un identifiant d'exemplaire dans le sabot sera utile seulement si le besoin le justifie.
+Le destinataire est représenté par `handNumber` : `null` désigne le
+croupier; 1 ou 2 désigne une main du joueur. Cela évite une colonne
+supplémentaire qui pourrait contredire la main associée.
 
-Plusieurs lignes de cartes pourront appartenir à une même partie grâce à `gameId`. La politique de suppression, les index et les contraintes de relation seront décidés avec le schéma.
+Deux clés étrangères sont déclarées : `gameId` vers la partie et
+`(gameId, handNumber)` vers la main. Pour le croupier, la seconde
+relation n'est pas exigée car `handNumber` est `null`; la relation à
+la partie reste obligatoire. [Clés étrangères composites SQLite](https://www.sqlite.org/foreignkeys.html#fk_composite).
+
+L'index `(gameId, handNumber)` facilite l'accès aux cartes d'une main.
+L'index unique `(gameId, drawOrder)` évite deux cartes au même emplacement
+de distribution d'une partie. `drawOrder` commence à 1 et concerne
+tous les tirages, joueur et croupier compris; le modèle devra fournir
+ce suivi lors du branchement de la sauvegarde. Aucune unicité n'est
+imposée sur rang/couleur : plusieurs paquets contiennent des exemplaires
+de mêmes valeurs.
+
+Les clés étrangères gardent l'action par défaut `NO_ACTION` : une
+suppression qui laisserait des références invalides est refusée.
+Aucune suppression en cascade ni fonctionnalité de suppression n'est
+ajoutée. [Clés étrangères Room 3](https://developer.android.com/reference/androidx/room3/ForeignKey).
 
 **Différence avec `Card` :** `Card` représente la carte utilisée par les règles du jeu; `DrawnCardEntity` ajoute le contexte nécessaire pour la retrouver dans une partie enregistrée.
 
@@ -489,7 +590,7 @@ Plusieurs lignes de cartes pourront appartenir à une même partie grâce à `ga
 1. `BlackjackGame` produit les résultats et la variation des jetons.
 2. `GameViewModel` demande la sauvegarde dans `viewModelScope`.
 3. `BlackjackRepository` prépare les données de sauvegarde.
-4. `BlackjackDao` enregistre la partie et les cartes dans une transaction.
+4. `BlackjackDao` enregistre la partie, ses mains et ses cartes dans une transaction.
 5. Room exécute les opérations dans SQLite.
 6. Le `Flow` d'historique publie les données actualisées.
 7. `HistoryViewModel` expose ce nouvel état à `HistoryScreen`.
@@ -500,11 +601,11 @@ Plusieurs lignes de cartes pourront appartenir à une même partie grâce à `ga
 
 Ce document ne fixe pas silencieusement les éléments suivants :
 
-- nombre de jeux utilisé par l'application et moment du renouvellement du sabot; le modèle reçoit déjà un nombre configurable et renvoie `null` lorsqu'il est vide;
+- nombre de jeux utilisé par l'application et moment du renouvellement du sabot entre les parties; `Shoe` renvoie déjà `null` lorsqu'il est vide et `BlackjackGame` interrompt la partie sans résultat;
 - solde initial, limites de mise et traitement durable du solde après fermeture;
 - paiement du Blackjack naturel et convention de calcul des jetons : mise déjà retirée ou non;
-- traitement du 17 souple et conditions détaillées du Split;
-- représentation persistée des mains, mises et résultats après Split;
+- conditions détaillées du Split; l'arrêt sur tout 17 est appliqué dans la partie standard selon le critère PB-07;
+- convention du résultat résumé d'une partie dont les mains ont des résultats différents après Split; la structure à trois tables est choisie et chaque main conserve déjà son résultat propre;
 - statistiques exactes exigées et leur unité de comptage : partie ou main;
 - détails des maquettes de jeu, de mise et des données (pour PB-02, les barres et le FAB sont validés avec l'option B).
 
@@ -542,6 +643,48 @@ Cette étape avance les bases de PB-03 et PB-04. Elle n'implémente pas
 ViewModels et aux écrans. Les tests Android ne sont pas relancés ici :
 aucune interface ou navigation n'a changé et les classes sont testées
 directement sur l'ordinateur. Aucun statut du backlog n'est modifié.
+
+### Vérifications de la partie standard — 8 octobre 2026
+
+L'option B pour `BlackjackGame` et l'option A pour l'épuisement du sabot
+sont implémentées. `gradlew.bat :app:testDebugUnitTest :app:assembleDebug`
+a réussi après correction d'une liste de cartes insuffisante dans un
+scénario de test. Les 30 tests de `BlackjackGameTest` passent, ainsi que
+les 21 tests existants du modèle : 51 tests métier sans échec ni test
+ignoré. Le test d'exemple initial passe également (52 tests au total).
+
+Les scénarios vérifient la distribution alternée, l'utilisation d'un
+vrai sabot, les trois cas de Blackjack naturel, Tirer, les As, le
+dépassement, 21 en trois cartes, Rester, les tirages successifs du
+croupier, l'arrêt à 17 dur/souple et au-dessus, les trois résultats,
+les actions invalides, une nouvelle partie et l'épuisement de la source
+pendant la distribution, le tour du joueur ou celui du croupier.
+
+Cette étape avance PB-04, PB-06 et PB-07 dans la couche Model.
+Elle ne livre pas les mises, les paiements, le Split, les ViewModels,
+les cartes graphiques ou le branchement des écrans. Aucun PBI n'est
+marqué terminé et le fichier Excel n'est pas modifié. Les tests sur
+émulateur ne sont pas relancés : ce bloc ne change aucune interface
+et se vérifie avec des tests Kotlin sur l'ordinateur.
+
+### Vérifications de la préparation Room — 8 octobre 2026
+
+L'option A à trois Entity est implémentée et Room 3.0.3 est ajouté
+avec l'autorisation de l'utilisateur. La commande
+`gradlew.bat :app:testDebugUnitTest :app:assembleDebug` a réussi.
+Les 51 tests métier existants passent, ainsi que le test d'exemple
+(52 tests au total, sans échec ni test ignoré).
+
+Les classes et leurs annotations compilent. La validation du schéma
+par le compilateur Room et les tests réels d'insertion, de lecture,
+de clés étrangères et d'unicité attendent le DAO et la base, qui
+n'existent pas encore. Aucun test artificiel des simples propriétés
+des `data class` n'est ajouté. Les tests sur émulateur ne sont pas
+relancés car aucune interface ne change et aucune base n'est ouverte.
+
+Cette étape prépare PB-10 et PB-11 sans les déclarer terminés.
+Le backlog Excel n'est pas modifié. Le repository, la sauvegarde,
+l'historique et le calcul des statistiques restent à implémenter.
 
 ### Vérifications du PB-02 — 7 octobre 2026
 

@@ -22,6 +22,14 @@ Chemin prévu : Compose → ViewModel → Repository → DAO → Room → SQLite
 Compose et les ViewModels passeront par le repository pour accéder aux
 données persistées. Les règles du jeu resteront dans le package `model`.
 
-Ce README réserve le package pour PB-01. Room et la base ne sont pas encore
-implémentés. Les dépendances, le schéma et ses relations restent à valider
-avant leur création.
+Room 3.0.3 est ajouté selon le choix autorisé du 8 octobre 2026, comme dans
+`Atelier3`. La dépendance `room3-runtime` fournit les annotations des trois
+Entity présentes : `GameEntity`, `HandEntity` et `DrawnCardEntity`.
+
+Les classes du DAO et de la base ne sont pas encore créées. Il n'existe
+donc pas encore de fichier SQLite ni de sauvegarde. Le compilateur Room
+et KSP seront ajoutés au bloc de la base et du DAO. Les annotations
+peuvent compiler dès maintenant, mais la génération et la validation
+complète du schéma Room attendent ce bloc.
+
+Cette préparation avance PB-10 et PB-11 sans les déclarer terminés.
