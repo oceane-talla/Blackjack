@@ -1,0 +1,159 @@
+package com.example.blackjack.ui
+
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.example.blackjack.R
+import com.example.blackjack.ui.navigation.BlackjackDestination
+import com.example.blackjack.ui.navigation.BlackjackNavHost
+import com.example.blackjack.ui.theme.BlackjackTheme
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BlackjackApp() {
+    val navController = rememberNavController()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route ?: BlackjackDestination.HOME
+    // La mise et la table appartiennent toutes les deux à l'onglet Jouer.
+    val selectedTab = if (currentRoute == BlackjackDestination.GAME) {
+        BlackjackDestination.BET
+    } else {
+        currentRoute
+    }
+    val tabRoutes = listOf(
+        BlackjackDestination.HOME,
+        BlackjackDestination.BET,
+        BlackjackDestination.HISTORY,
+        BlackjackDestination.STATISTICS
+    )
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(destinationTitle(currentRoute))) },
+                navigationIcon = {
+                    if (currentRoute == BlackjackDestination.BET ||
+                        currentRoute == BlackjackDestination.GAME
+                    ) {
+                        IconButton(onClick = { navController.popBackStack() }) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_arrow_back),
+                                contentDescription = stringResource(R.string.navigate_back)
+                            )
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.primary,
+                    navigationIconContentColor = MaterialTheme.colorScheme.primary
+                )
+            )
+        },
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                for (route in tabRoutes) {
+                    NavigationBarItem(
+                        modifier = Modifier.testTag("navigation_$route"),
+                        selected = selectedTab == route,
+                        onClick = {
+                            navController.navigate(route) {
+                                // On évite d'empiler les onglets; leur parcours est conservé.
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                // Accueil reste la racine, sans restaurer le parcours de Jouer.
+                                restoreState = route != BlackjackDestination.HOME
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                painter = painterResource(destinationIcon(route)),
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text(stringResource(destinationTitle(route))) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.primary,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.surfaceVariant,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
+            }
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                modifier = Modifier.testTag("new_game_fab"),
+                onClick = {
+                    // Une nouvelle préparation ne restaure pas une ancienne table.
+                    navController.clearBackStack(BlackjackDestination.BET)
+                    navController.navigate(BlackjackDestination.BET) {
+                        popUpTo(BlackjackDestination.HOME)
+                        launchSingleTop = true
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                icon = {
+                    Icon(painterResource(R.drawable.ic_add), contentDescription = null)
+                },
+                text = { Text(stringResource(R.string.new_game)) }
+            )
+        }
+    ) { innerPadding ->
+        BlackjackNavHost(
+            navController = navController,
+            modifier = Modifier.padding(innerPadding)
+        )
+    }
+}
+
+private fun destinationTitle(route: String): Int = when (route) {
+    BlackjackDestination.BET -> R.string.destination_bet
+    BlackjackDestination.GAME -> R.string.destination_game
+    BlackjackDestination.HISTORY -> R.string.destination_history
+    BlackjackDestination.STATISTICS -> R.string.destination_statistics
+    else -> R.string.destination_home
+}
+
+private fun destinationIcon(route: String): Int = when (route) {
+    BlackjackDestination.BET -> R.drawable.ic_play
+    BlackjackDestination.HISTORY -> R.drawable.ic_history
+    BlackjackDestination.STATISTICS -> R.drawable.ic_statistics
+    else -> R.drawable.ic_home
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun BlackjackAppPreview() {
+    BlackjackTheme {
+        BlackjackApp()
+    }
+}

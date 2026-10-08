@@ -1,3 +1,25 @@
 <resources>
     <string name="app_name">Blackjack</string>
+    <string name="destination_home">Accueil</string>
+    <string name="destination_bet">Jouer</string>
+    <string name="destination_game">Partie</string>
+    <string name="destination_history">Historique</string>
+    <string name="destination_statistics">Statistiques</string>
+    <string name="new_game">Nouvelle partie</string>
+    <string name="navigate_back">Retour</string>
+    <string name="home_title">Prenez place à la table</string>
+    <string name="home_description">Bienvenue au Blackjack. Préparez votre mise et retrouvez la table de jeu.</string>
+    <string name="start_game">Jouer au Blackjack</string>
+    <string name="bet_title">Préparer une partie</string>
+    <string name="bet_description">Le choix de la mise et le solde de jetons seront disponibles prochainement. Vous pouvez déjà découvrir la table.</string>
+    <string name="open_table">Voir la table</string>
+    <string name="game_title">La table</string>
+    <string name="game_description">La distribution des cartes et les actions de jeu seront disponibles prochainement.</string>
+    <string name="dealer">Croupier</string>
+    <string name="player">Joueur</string>
+    <string name="change_bet">Changer la mise</string>
+    <string name="history_title">Vos parties</string>
+    <string name="history_description">L’historique sera disponible lorsque les parties pourront être enregistrées.</string>
+    <string name="statistics_title">Vos statistiques</string>
+    <string name="statistics_description">Les statistiques seront disponibles à partir des parties enregistrées.</string>
 </resources>

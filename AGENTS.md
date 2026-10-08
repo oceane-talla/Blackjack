@@ -2,7 +2,7 @@
 
 ## Priorite absolue
 
-Ce projet est un travail d'apprentissage. L'objectif n'est pas seulement de produire une application fonctionnelle : le proprietaire du projet doit comprendre, pouvoir expliquer et pouvoir modifier tout le code remis.
+Ce projet est un travail d'apprentissage. : le proprietaire du projet doit comprendre, pouvoir expliquer et pouvoir modifier tout le code remis.
 
 L'utilisateur demeure le decideur final, choisit l'ordre des etapes et indique quand passer a l'etape suivante. L'agent agit comme un developpeur junior d'execution : il analyse la demande precise, signale les problemes, propose au besoin des options, puis implemente uniquement l'etape approuvee. Il ne joue pas le role de chef de projet, de Product Owner ou d'architecte decisionnaire.
 
@@ -166,6 +166,15 @@ Le projet dispose de trois semaines. Prioriser dans cet ordre :
 Ne pas commencer une amelioration facultative tant qu'une exigence obligatoire demeure incomplete ou instable.
 
 Sont hors perimetre par defaut : jeu en ligne, comptes utilisateurs, API Web, Firebase, animations complexes, assurance, abandon, double, re-Split, themes multiples et statistiques non demandees. Toute modification de ce perimetre appartient a l'utilisateur.
+
+## Preference visuelle de l'utilisateur
+
+- L'utilisateur souhaite une ambiance de Blackjack de casino classique, inspiree de la capture fournie le 6 octobre 2026.
+- Privilegier une table en tapis vert, des bordures ou accents dores, des cartes traditionnelles lisibles et des jetons de casino colores.
+- Organiser l'ecran de partie comme une table de jeu : croupier en haut, mains du joueur plus bas, mise et actions faciles a reperer.
+- Appliquer une identite visuelle coherente a l'accueil et aux autres ecrans, tout en conservant Scaffold, TopAppBar, navigation inferieure et FAB selon les exigences.
+- La capture est une reference esthetique : elle n'autorise pas l'ajout des fonctionnalites visibles hors perimetre (Double, assurance, etc.), ni plusieurs themes selectionnables.
+- Faire valider les details de la maquette par l'utilisateur avant d'implementer l'interface.
 
 ## Tests et verification
 
