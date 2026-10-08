@@ -6,7 +6,7 @@ Document de travail mis à jour le 8 octobre 2026, basé sur notre discussion et
 
 Ce document décrit la structure visée et sert à comprendre où placer chaque responsabilité. Les noms des fonctions proposées pourront être ajustés ensemble avant leur implémentation. Leur présence ici ne signifie pas que le code existe déjà ni que toutes les décisions sont prises.
 
-**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont provisoires : la navigation est implémentée, mais le branchement du jeu à l'interface, les mises et la persistance restent à construire. `Card`, `Hand`, `Shoe` et la partie standard de `BlackjackGame` sont implémentés dans le package `model`, sans branchement aux écrans. Room 3.0.3 est ajouté et les trois Entity `GameEntity`, `HandEntity` et `DrawnCardEntity` sont définies. Le DAO, la base et le repository restent à créer. Les vérifications figurent à la section 9.
+**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont provisoires : la navigation est implémentée, mais le branchement du jeu à l'interface, les mises et la persistance dans les écrans restent à construire. `Card`, `Hand`, `Shoe`, `DealtCard` et la partie standard de `BlackjackGame` sont implémentés dans le package `model`, avec le suivi des distributions et le calcul de variation nette des jetons, sans branchement aux écrans. Room 3.0.3 et KSP sont configurés; les trois Entity, `BlackjackDao`, `BlackjackDatabase` et `BlackjackRepository` existent. Les ViewModels et l'instance partagée dans `BlackjackApplication` restent à créer. Les vérifications figurent à la section 9.
 
 `HomeScreen` est conservé conformément à ton choix et se trouve maintenant dans `ui/screens/home`. La navigation a été extraite dans `ui/navigation/BlackjackNavHost.kt`.
 
@@ -46,7 +46,8 @@ com.example.blackjack
 │   ├── Card.kt
 │   ├── Hand.kt
 │   ├── Shoe.kt
-│   └── BlackjackGame.kt
+│   ├── BlackjackGame.kt
+│   └── DealtCard.kt
 │
 ├── repository
 │   └── BlackjackRepository.kt
@@ -374,14 +375,22 @@ le nombre de copies de chaque rang/couleur dans plusieurs paquets.
 | `split()` | Séparer les cartes, répartir les mises et organiser les tours des mains. |
 | `playDealerTurn()` — interne | Faire jouer le croupier selon la règle de 17, lorsque les tours du joueur sont terminés. |
 | `determineResult()` — interne | Comparer la main du joueur au croupier et produire victoire, défaite ou égalité. Le traitement de plusieurs mains viendra avec le Split. |
-| `calculateChipChange()` — interne | Calculer la variation des jetons selon les résultats et le traitement des mises retenu. |
+| `calculateChipChange(bet)` — implémentée | Fournir la variation nette d'une partie terminée pour une mise positive, sans modifier le solde. |
 
 Les noms sont des propositions : nous éviterons de créer plusieurs fonctions qui appliquent deux fois la même règle. Les fonctions internes ne seront pas exposées à l'écran si elles ne correspondent pas à une action utilisateur.
 
 **État actuel — option B choisie le 8 octobre 2026 :** `startRound()`,
 `hit()`, `stand()`, `playDealerTurn()` et `determineResult()` sont
-implémentées pour une seule main, sans mises ni Split. Les fonctions de
-validation de mise, de Split et de calcul des jetons restent prévues.
+implémentées pour une seule main. `calculateChipChange(bet)` calcule aussi
+les jetons : `-bet` pour une défaite, `0` pour une égalité, `+bet` pour une
+victoire ordinaire et `+1.5 * bet` pour un Blackjack naturel gagnant,
+selon le choix A de l'utilisateur. Deux Blackjacks naturels donnent `0`.
+Les limites de mise, la gestion du solde et le Split restent à faire.
+
+`DealtCard` et la liste `dealtCards` conservent l'ordre global et le
+destinataire de chaque carte effectivement distribuée. La liste exposée
+est une copie; une nouvelle partie recommence à l'ordre 1. Un tirage
+impossible n'ajoute aucune carte au suivi.
 
 Le constructeur public reçoit un `Shoe` existant. Le constructeur
 `internal` reçoit une fonction `() -> Card?`, sans paramètre, qui renvoie
@@ -444,6 +453,16 @@ Le repository ne remplace pas le moteur de jeu et ne décide pas qu'un As vaut 1
 
 La sauvegarde doit être **atomique** : on enregistre la partie, ses mains et ses cartes ensemble, ou rien. Une transaction au niveau du DAO permet d'éviter une partie enregistrée avec la moitié de ses cartes.
 
+**État actuel :** `BlackjackRepository` reçoit le DAO et implémente
+`saveFinishedGame(game, bet, playedAt)`, `observeHistory()`, `getHands(gameId)`
+et `getDrawnCards(gameId)`. Il convertit la partie standard terminée en
+Entity, après avoir demandé au modèle `calculateChipChange(bet)`. La date
+peut être fournie explicitement; sinon l'heure de sauvegarde est utilisée.
+Le DAO remplace les identifiants provisoires et effectue la transaction.
+La méthode retourne l'identifiant généré et laisse remonter les erreurs.
+Le modèle actuel fournit une seule main; Split et statistiques attendent
+leur étape. Les ViewModels et l'instance partagée restent à créer.
+
 ## 6. Package database : Room et SQLite
 
 ### Les termes à comprendre
@@ -464,7 +483,7 @@ La sauvegarde doit être **atomique** : on enregistre la partie, ses mains et se
 | `@Database` | Déclare la base, ses Entity et sa version. |
 | Migration | Décrit comment faire évoluer les tables sans perdre les données existantes. |
 
-Ces notions suivent la [documentation Android sur Room](https://developer.android.com/training/data-storage/room). Room 3.0.3 est choisi et autorisé le 8 octobre 2026, comme dans `Atelier3`. La dépendance `androidx.room3:room3-runtime:3.0.3` fournit les annotations nécessaires aux Entity. Le compilateur Room et KSP seront ajoutés lors de la création de la base et du DAO, lorsqu'ils deviendront nécessaires. [Versions officielles de Room 3](https://developer.android.com/jetpack/androidx/releases/room3).
+Ces notions suivent la [documentation Android sur Room](https://developer.android.com/training/data-storage/room). Room 3.0.3 est choisi et autorisé le 8 octobre 2026, comme dans `Atelier3`. `room3-runtime` fournit les API et annotations; `room3-compiler`, configuré avec KSP 2.3.6, valide le schéma et génère les classes concrètes. `sqlite-framework` 2.7.1 fournit `AndroidSQLiteDriver`, utilisé pour ouvrir les bases de test. Ces outils reprennent la configuration du cours. [Versions officielles de Room 3](https://developer.android.com/jetpack/androidx/releases/room3).
 
 ### database/BlackjackDatabase.kt
 
@@ -476,7 +495,9 @@ Ces notions suivent la [documentation Android sur Room](https://developer.androi
 | Héritage de `RoomDatabase` | Utiliser les services de Room. |
 | `blackjackDao()` | Fournir le DAO permettant les opérations sur les données. |
 
-L'instance sera créée et conservée par `BlackjackApplication`. On évite deux mécanismes concurrents de création de la base. Cette classe n'a pas besoin d'une méthode spécifique pour chaque requête.
+La classe est présente avec les trois Entity, `version = 1` et `exportSchema = false`, comme dans `Atelier3`. Elle est abstraite : Room génère sa classe concrète. Aucun fichier de schéma n'est exporté; une migration devra être décidée avant de modifier une base déjà utilisée. Aucune suppression automatique des données n'est configurée.
+
+Les tests ouvrent une base en mémoire ou un fichier réservé aux tests avec `AndroidSQLiteDriver`. L'instance de production sera créée et conservée par `BlackjackApplication`, à une étape ultérieure. Cette classe n'a pas besoin d'une méthode spécifique pour chaque requête.
 
 ### database/dao/BlackjackDao.kt
 
@@ -487,10 +508,15 @@ L'instance sera créée et conservée par `BlackjackApplication`. On évite deux
 | `insertGame(game)` — `suspend` | Insérer le résumé d'une partie et obtenir son identifiant. |
 | `insertHands(hands)` — `suspend` | Insérer les mains du joueur avec l'identifiant de leur partie. |
 | `insertDrawnCards(cards)` — `suspend` | Insérer les cartes avec l'identifiant de leur partie. |
-| `insertGameWithCards(...)` — transaction `suspend`, nom provisoire | Coordonner l'insertion de la partie, puis de ses mains, puis de ses cartes comme une sauvegarde unique. |
-| `observeHistory()` — `Flow` | Lire les parties dans l'ordre retenu et publier les changements. |
-| `getDrawnCards(gameId)` — `suspend`, selon le besoin | Lire les cartes associées à une partie dans leur ordre enregistré. |
-| `observeStatistics()` — `Flow`, nom provisoire | Calculer les agrégats SQLite demandés. Plusieurs requêtes pourront être nécessaires selon l'énoncé. |
+| `insertGameWithDetails(...)` — transaction `suspend` | Coordonner l'insertion de la partie, puis de ses mains, puis de ses cartes comme une sauvegarde unique. |
+| `observeHistory()` — `Flow` | Lire les parties par date décroissante, puis identifiant décroissant en cas de dates identiques, et publier les changements. |
+| `getHands(gameId)` — `suspend` | Lire les mains associées à une partie par numéro croissant. |
+| `getDrawnCards(gameId)` — `suspend` | Lire ses cartes par `drawOrder` croissant. |
+| `observeStatistics()` — prévu seulement | Les agrégats SQLite seront définis et implémentés à leur étape. |
+
+Toutes les fonctions de sauvegarde et d'historique du tableau sont implémentées dans l'interface `@Dao`. `@Insert` et `@Query` permettent à Room de générer les opérations. Dans une requête, `:gameId` reçoit le paramètre Kotlin du même nom.
+
+`insertGameWithDetails` récupère l'identifiant retourné par `insertGame`, puis utilise `map` et `copy` pour le donner aux mains et aux cartes sans modifier les objets reçus. Les mains sont insérées avant leurs cartes pour respecter les clés étrangères. `@Transaction` conserve toutes ces écritures ensemble ou annule tout si une insertion échoue. L'erreur remonte à l'appelant, sans remplacement automatique des lignes existantes.
 
 Les statistiques pourront utiliser `COUNT`, `SUM`, `AVG` ou `GROUP BY` si ces opérations correspondent aux indicateurs demandés. Nous choisirons les requêtes à partir du besoin, pas à partir d'une liste arbitraire de fonctions SQL.
 
@@ -501,11 +527,11 @@ Une lecture observable retourne un `Flow`; une écriture ponctuelle utilise une 
 **Rôle :** décrire comment le résumé d'une partie est enregistré dans la base. Ce n'est pas le moteur `BlackjackGame`.
 
 **État actuel :** cette `data class` est annotée `@Entity(tableName = "games")`.
-Chaque objet décrit une ligne de la future table `games`, sans fonction de jeu.
+Chaque objet décrit une ligne de la table `games`, sans fonction de jeu.
 
 | Propriété | Donnée conservée |
 | --- | --- |
-| `id: Long` | Clé primaire générée par Room lors d'une future insertion; 0 avant insertion. |
+| `id: Long` | Clé primaire générée par Room lors de l'insertion; 0 avant insertion. |
 | `playedAt: Long` | Date en millisecondes depuis le 1er janvier 1970. |
 | `initialBet: Int` | Mise de départ. |
 | `totalBet: Int` | Total des mises, y compris la seconde main après un Split. |
@@ -603,7 +629,7 @@ Ce document ne fixe pas silencieusement les éléments suivants :
 
 - nombre de jeux utilisé par l'application et moment du renouvellement du sabot entre les parties; `Shoe` renvoie déjà `null` lorsqu'il est vide et `BlackjackGame` interrompt la partie sans résultat;
 - solde initial, limites de mise et traitement durable du solde après fermeture;
-- paiement du Blackjack naturel et convention de calcul des jetons : mise déjà retirée ou non;
+- application de la variation nette au solde : le modèle calcule déjà le gain ou la perte, avec Blackjack naturel gagnant à 1,5 fois la mise selon le choix A; la gestion du solde reste à intégrer sans retirer la mise deux fois;
 - conditions détaillées du Split; l'arrêt sur tout 17 est appliqué dans la partie standard selon le critère PB-07;
 - convention du résultat résumé d'une partie dont les mains ont des résultats différents après Split; la structure à trois tables est choisie et chaque main conserve déjà son résultat propre;
 - statistiques exactes exigées et leur unité de comptage : partie ou main;
@@ -685,6 +711,89 @@ relancés car aucune interface ne change et aucune base n'est ouverte.
 Cette étape prépare PB-10 et PB-11 sans les déclarer terminés.
 Le backlog Excel n'est pas modifié. Le repository, la sauvegarde,
 l'historique et le calcul des statistiques restent à implémenter.
+
+### Vérifications du DAO et de la base Room — 8 octobre 2026
+
+L'option B (DAO et base ensemble), avec configuration KSP, est implémentée
+après autorisation de l'utilisateur. La commande
+`gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest`
+a réussi. Room a validé les tables et requêtes et généré les classes
+`BlackjackDatabase_Impl` et `BlackjackDao_Impl`. Les 51 tests métier
+existants et le test d'exemple passent (52 tests, aucun échec ni test ignoré).
+
+Les 15 tests de `BlackjackDaoTest` passent sur un émulateur Pixel 8
+temporaire. Ils vérifient la sauvegarde des trois tables, la liaison avec
+l'identifiant généré, deux mains aux résultats distincts, le tri de
+l'historique et des cartes, ainsi qu'une nouvelle émission du `Flow`.
+Ils vérifient aussi les clés étrangères (y compris une carte liée à la
+mauvaise partie), les cartes du croupier avec `handNumber = null`, les
+doublons de main et de position de distribution, l'annulation de toute
+la transaction après erreur et les cartes de même rang/couleur à des
+positions différentes. Un test ferme puis rouvre un fichier SQLite et
+retrouve le résumé, les mains et les cartes. Ce fichier est réservé aux
+tests et supprimé ensuite.
+
+Après installation des deux APK sur Pixel 8, les tests ont été lancés avec :
+
+```text
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.database.BlackjackDaoTest com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Les tests de navigation ne sont pas relancés : aucune interface ne change.
+Le repository, l'instance partagée dans `BlackjackApplication`, les
+ViewModels et la sauvegarde depuis le jeu restent à implémenter.
+Les requêtes de statistiques ne font pas partie de ce bloc.
+PB-10 et PB-11 avancent sans être déclarés terminés; le backlog Excel
+n'est pas modifié. La sauvegarde transactionnelle, le `Flow` observable
+et la conservation après réouverture peuvent être présentés en Sprint Review
+à partir de ces tests, sans prétendre que l'historique est déjà affiché.
+
+### Vérifications du suivi, des paiements et du repository — 8 octobre 2026
+
+Les tests reportés par l'utilisateur sont maintenant ajoutés et exécutés.
+18 tests complètent `BlackjackGameTest` (48 tests dans ce fichier) et
+12 tests Android sont ajoutés dans `BlackjackRepositoryTest`.
+La compilation de l'application et des tests Android réussit avec :
+
+```text
+gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Les 70 tests Kotlin passent : 69 tests métier et le test d'exemple.
+Aucun échec, erreur ni test ignoré n'est présent dans les rapports JUnit.
+Les nouveaux scénarios vérifient l'ordre global et le destinataire des
+cartes, les tirages du joueur et du croupier, la remise à zéro entre deux
+parties, les copies de listes, les actions refusées et l'absence de carte
+fictive après épuisement du sabot. Les paiements couvrent la victoire
+ordinaire, le Blackjack naturel à 1,5 avec demi-jetons, 21 en trois cartes,
+le dépassement du croupier, les défaites, les égalités et deux Blackjacks.
+Les mises non positives et le règlement d'une partie inachevée sont refusés.
+
+Sur un Pixel 8 temporaire, les 12 tests repository et les 15 tests DAO
+existants passent ensemble : 27 tests Android réussis. Le repository est
+vérifié avec Room et SQLite réels, pas avec un faux DAO. Les tests couvrent
+les trois tables, tous les champs convertis, les identifiants générés,
+les paiements, les lectures, le tri et les nouvelles émissions du Flow.
+Une partie inachevée ou une mise invalide n'écrit rien et ne modifie pas
+les données précédentes. Une nouvelle partie ne mélange pas ses cartes
+avec celles déjà sauvegardées. La fermeture et réouverture d'un fichier
+SQLite réservé aux tests conserve le résumé, la main et les cartes.
+
+Après installation des APK sur Pixel 8, la commande Android est :
+
+```text
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.repository.BlackjackRepositoryTest,com.example.blackjack.database.BlackjackDaoTest com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Les bases de test sont isolées et le fichier réservé au repository est
+supprimé après les tests. L'émulateur temporaire est fermé ensuite.
+Les tests de navigation ne sont pas relancés : aucune interface ne change.
+Aucune modification du code de production n'a été nécessaire dans ce bloc.
+
+Ces preuves peuvent alimenter la Sprint Review pour PB-07, PB-10, PB-11
+et PB-15 sans déclarer ces PBI terminés ni modifier le backlog Excel.
+Les ViewModels, l'instance partagée, le solde, le branchement aux écrans,
+le Split et les statistiques restent à implémenter et à tester à leur étape.
 
 ### Vérifications du PB-02 — 7 octobre 2026
 

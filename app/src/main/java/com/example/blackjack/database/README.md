@@ -1,35 +1,35 @@
 # Package database
 
-Ce package contiendra la base de données locale et ses deux sous-packages :
+`BlackjackDatabase.kt` déclare la base Room, ses trois tables (`GameEntity`,
+`HandEntity`, `DrawnCardEntity`) et l'accès à `BlackjackDao`.
 
 - `dao` : déclarer les lectures et écritures.
 - `entity` : décrire les tables et les données enregistrées.
 
-Room est la bibliothèque Android qui organise l'accès à SQLite. SQLite est
-le moteur qui conserve les données sur l'appareil.
+Room organise l'accès à SQLite, le moteur qui conserve les données sur
+l'appareil. La classe de base est `abstract` : Room génère la classe
+concrète à la compilation, comme l'implémentation du DAO.
 
-Fichier prévu dans `ARCHITECTURE.md`, à créer à l'étape correspondante :
+La configuration reprend les outils utilisés dans `Atelier3` :
+Room 3.0.3, le compilateur `room3-compiler` avec KSP 2.3.6 et
+`sqlite-framework` 2.7.1 pour `AndroidSQLiteDriver`.
 
-- `BlackjackDatabase.kt` : déclarer les Entity incluses, la version du schéma
-  et l'accès à `BlackjackDao`.
+Le schéma commence à la version 1. `exportSchema = false` reprend la
+configuration du cours : aucun fichier de schéma n'est exporté.
+Avant de modifier une base déjà utilisée, il faudra décider de sa
+migration; aucune suppression automatique des données n'est configurée.
 
-L'instance de la base sera créée et conservée par `BlackjackApplication`,
-afin de partager une seule instance dans l'application. Cette classe
-Application sera distincte du composable `BlackjackApp`.
+Les tests Android ouvrent une base en mémoire pour les opérations et
+une base de test sur disque pour vérifier la conservation après fermeture.
+Cette dernière porte un nom réservé aux tests et est supprimée ensuite.
+
+L'instance partagée sera créée dans `BlackjackApplication`, une classe
+Android distincte du composable `BlackjackApp`. Elle n'est pas encore
+implémentée dans ce bloc, comme le repository et leur branchement aux écrans.
 
 Chemin prévu : Compose → ViewModel → Repository → DAO → Room → SQLite.
 
 Compose et les ViewModels passeront par le repository pour accéder aux
 données persistées. Les règles du jeu resteront dans le package `model`.
 
-Room 3.0.3 est ajouté selon le choix autorisé du 8 octobre 2026, comme dans
-`Atelier3`. La dépendance `room3-runtime` fournit les annotations des trois
-Entity présentes : `GameEntity`, `HandEntity` et `DrawnCardEntity`.
-
-Les classes du DAO et de la base ne sont pas encore créées. Il n'existe
-donc pas encore de fichier SQLite ni de sauvegarde. Le compilateur Room
-et KSP seront ajoutés au bloc de la base et du DAO. Les annotations
-peuvent compiler dès maintenant, mais la génération et la validation
-complète du schéma Room attendent ce bloc.
-
-Cette préparation avance PB-10 et PB-11 sans les déclarer terminés.
+Ce bloc avance PB-10 et PB-11 sans les déclarer terminés.

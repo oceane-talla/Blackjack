@@ -1,25 +1,41 @@
 # Package database.dao
 
-Ce package contiendra le DAO, pour Data Access Object : l'interface qui
-déclare les opérations de lecture et d'écriture. Room fournira son
-implémentation à partir des annotations et des requêtes SQL.
+`BlackjackDao.kt` est le DAO (Data Access Object) : l'interface qui déclare
+les lectures et écritures de la base. Room génère son implémentation grâce
+aux annotations et au compilateur configuré avec KSP.
 
-Fichier prévu dans `ARCHITECTURE.md`, à créer à l'étape correspondante :
+- `insertGame` insère le résumé et retourne l'identifiant attribué par Room.
+- `insertHands` et `insertDrawnCards` insèrent les mains et les cartes.
+- `insertGameWithDetails` regroupe ces trois écritures dans une transaction.
+- `observeHistory` retourne un `Flow` des parties, des plus récentes aux
+  plus anciennes; l'identifiant départage deux dates identiques.
+- `getHands` lit les mains d'une partie, dans l'ordre de leur numéro.
+- `getDrawnCards` lit ses cartes dans l'ordre de distribution.
 
-- `BlackjackDao.kt` : insérer les parties et leurs cartes, observer
-  l'historique et calculer les statistiques demandées avec SQL.
+Les écritures et lectures ponctuelles sont des fonctions `suspend`, à
+appeler dans une coroutine. Le `Flow` fournit une liste puis de nouvelles
+listes lorsque la table des parties change.
 
-Le repository appellera le DAO. Le DAO utilisera Room pour accéder à SQLite.
+La sauvegarde complète insère d'abord la partie, puis utilise `map` et
+`copy` pour donner son identifiant aux mains et aux cartes sans modifier
+les objets reçus. Les mains sont insérées avant les cartes du joueur,
+car ces cartes doivent référencer une main existante.
 
-Les lectures observables retourneront un `Flow`, qui publie de nouvelles
-données lorsque la base change. Les écritures ponctuelles seront des
-fonctions `suspend`, utilisables depuis les coroutines.
+`@Transaction` garantit que toutes ces écritures réussissent ensemble.
+Si une carte est invalide, aucune partie ni main de cette sauvegarde
+n'est conservée. L'erreur est transmise à l'appelant. Aucun remplacement
+automatique d'une ligne existante ni suppression n'est ajouté.
 
-L'enregistrement d'une partie et de ses cartes devra utiliser une
-transaction : toutes les insertions réussissent ensemble, ou aucune n'est
-conservée. Cela évite un historique contenant une partie enregistrée avec
-seulement une partie de ses cartes.
+Dans les requêtes SQL, `:gameId` reçoit le paramètre Kotlin `gameId`.
+`@Query` permet à Room de vérifier les tables et colonnes à la compilation.
 
-Ce README réserve le package pour PB-01. Aucun DAO ni requête SQL n'est
-encore implémenté. Les requêtes exactes dépendront du schéma et des
-statistiques validés.
+Les tests Android `BlackjackDaoTest.kt` vérifient ce comportement avec
+SQLite. Le repository et l'instance partagée dans l'application restent
+à créer; les écrans ne sont donc pas encore reliés à la sauvegarde.
+Les requêtes de statistiques restent à définir à leur étape.
+
+Ce bloc avance PB-10 et PB-11 sans les déclarer terminés.
+
+Vérification du 8 octobre 2026 : compilation réussie, 52 tests Kotlin
+et 15 tests DAO réussis sur Pixel 8. Les commandes et scénarios sont
+consignés dans la section 9 de `ARCHITECTURE.md`.

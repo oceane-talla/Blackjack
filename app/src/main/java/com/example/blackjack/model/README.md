@@ -19,6 +19,9 @@ Fichiers présents, créés dans les blocs choisis le 8 octobre 2026 :
   jouer le croupier et produire victoire, défaite ou égalité. Il contient
   aussi les `enum class` `GamePhase` et `GameResult` pour les valeurs
   possibles de la phase et du résultat.
+- `DealtCard.kt` : représenter une carte distribuée, son destinataire
+  (`handNumber = 1` pour le joueur, `null` pour le croupier) et son ordre
+  global de distribution, à partir de 1.
 
 `Hand.cards` fournit une copie de la liste : la main se modifie par
 `addCard()`. `remainingCards` indique la taille de la réserve du sabot.
@@ -76,7 +79,17 @@ Le constructeur `internal` permet aux tests de fournir une fonction
 carte ou `null`. Les scénarios sont ainsi reproductibles, sans modifier
 `Shoe` ni ajouter une bibliothèque.
 
-Les mises, les paiements et le Split ne sont pas implémentés ici.
+`dealtCards` fournit une copie du suivi global des cartes effectivement
+distribuées. Une nouvelle partie vide ce suivi; un tirage impossible
+n'ajoute aucune entrée. Le repository utilise ce suivi pour sauvegarder
+l'ordre et le destinataire de chaque carte.
+
+`calculateChipChange(bet)` fournit une variation nette en `Double` pour
+une partie terminée et une mise positive : défaite `-bet`, égalité `0`,
+victoire ordinaire `+bet`, Blackjack naturel gagnant `+1.5 * bet`, selon
+le choix A de l'utilisateur. Deux Blackjacks naturels restent une égalité.
+La fonction ne modifie pas un solde : celui-ci sera géré à son étape.
+Les limites de mise, la gestion du solde et le Split restent à implémenter.
 Les écrans et ViewModels ne sont pas encore branchés à ces classes;
 le masquage de la carte du croupier sera géré lors de ce branchement.
 
@@ -93,3 +106,9 @@ sabot), ainsi que les 30 tests de la partie standard : 51 tests métier.
 ```text
 gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 ```
+
+Vérification complémentaire du 8 octobre 2026 : 18 tests sont ajoutés
+pour le suivi des cartes et le calcul des jetons. Les 48 tests de
+`BlackjackGameTest` passent avec les 21 autres tests métier et le test
+d'exemple : 70 tests Kotlin réussis. Les scénarios et commandes sont
+consignés dans la section 9 de `ARCHITECTURE.md`.

@@ -20,6 +20,11 @@ class BlackjackGame internal constructor(private val drawCard: () -> Card?) {
     private var playerHand = Hand()
     private var dealerHand = Hand()
 
+    private val distributedCards = mutableListOf<DealtCard>()
+
+    val dealtCards: List<DealtCard>
+        get() = distributedCards.toList()
+
     val playerCards: List<Card>
         get() = playerHand.cards
 
@@ -57,12 +62,13 @@ class BlackjackGame internal constructor(private val drawCard: () -> Card?) {
 
         playerHand = Hand()
         dealerHand = Hand()
+        distributedCards.clear()
         result = null
         playerHasBlackjack = false
         dealerHasBlackjack = false
         phase = GamePhase.READY
 
-        // Distribution alternée : joueur, croupier, joueur, croupier.
+        // Distribution alternée des cartes : joueur, croupier, joueur, croupier.
         repeat(2) {
             if (!dealCardTo(playerHand) || !dealCardTo(dealerHand)) {
                 return false
@@ -104,6 +110,23 @@ class BlackjackGame internal constructor(private val drawCard: () -> Card?) {
         return phase != GamePhase.INTERRUPTED
     }
 
+    fun calculateChipChange(bet: Int): Double {
+        require(bet > 0) { "The bet must be positive." }
+        check(phase == GamePhase.FINISHED) {
+            "The chip change can only be calculated for a finished game."
+        }
+        val finishedResult = checkNotNull(result) {
+            "A finished game must have a result."
+        }
+
+        // Variation nette : la mise rendue n'est pas un gain supplémentaire.
+        return when (finishedResult) {
+            GameResult.LOSS -> -bet.toDouble()
+            GameResult.DRAW -> 0.0
+            GameResult.WIN -> if (playerHasBlackjack) bet * 1.5 else bet.toDouble()
+        }
+    }
+
     private fun playDealerTurn() {
         phase = GamePhase.DEALER_TURN
 
@@ -138,6 +161,13 @@ class BlackjackGame internal constructor(private val drawCard: () -> Card?) {
         }
 
         hand.addCard(card)
+        distributedCards.add(
+            DealtCard(
+                card = card,
+                handNumber = if (hand === playerHand) 1 else null,
+                drawOrder = distributedCards.size + 1
+            )
+        )
         return true
     }
 

@@ -19,8 +19,8 @@ La clé primaire d'une main est composée de `gameId` et `handNumber` :
 la main 1 peut exister dans plusieurs parties, mais une seule fois dans
 chaque partie. `@ForeignKey` indique que `gameId` doit référencer une
 partie existante; les cartes du joueur doivent aussi référencer une main
-de cette même partie. Les contraintes seront appliquées une fois la
-base Room créée et utilisée.
+de cette même partie. Les contraintes sont appliquées par SQLite lorsque
+la base Room est ouverte et utilisée.
 
 Dans `DrawnCardEntity`, `handNumber = null` indique une carte du croupier;
 1 ou 2 indique une main du joueur. Rang et couleur sont les noms anglais
@@ -44,10 +44,12 @@ Ces classes décriront les données conservées. `BlackjackGame` et `Card`,
 dans le package `model`, resteront responsables de la représentation et
 des règles du jeu en mémoire.
 
-Room 3.0.3 est ajouté, mais le DAO, la base et le repository restent à
-créer : ces objets ne sont pas encore sauvegardés. La compilation des
-annotations ne remplace pas les tests d'insertion et de lecture qui
-seront faits avec la base réelle. Cette étape prépare PB-10 et PB-11.
+Room 3.0.3, le DAO et la base sont maintenant configurés. Le compilateur
+Room valide le schéma et génère les insertions et lectures. Les tests
+Android `BlackjackDaoTest.kt` vérifient les relations et l'unicité avec
+SQLite. Le repository et l'instance partagée dans l'application restent
+à créer : les parties jouées ne sont pas encore enregistrées par l'UI.
+Cette étape avance PB-10 et PB-11.
 
 Vérification du 8 octobre 2026 : la compilation avec Room 3.0.3 réussit
 et les 51 tests métier existants passent (52 avec le test d'exemple).
@@ -55,3 +57,9 @@ et les 51 tests métier existants passent (52 avec le test d'exemple).
 ```text
 gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 ```
+
+Vérification complémentaire du bloc DAO/base, le 8 octobre 2026 :
+la génération Room avec KSP et les APK de l'application et des tests
+compilent. Les 52 tests Kotlin passent ainsi que les 15 tests DAO sur
+Pixel 8, dont les relations, l'unicité, les transactions et la
+conservation des données après fermeture et réouverture de SQLite.
