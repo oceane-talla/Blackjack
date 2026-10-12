@@ -20,18 +20,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.blackjack.viewmodel.GameViewModel
+import com.example.blackjack.viewmodel.HistoryViewModel
+import com.example.blackjack.viewmodel.StatisticsViewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.blackjack.R
 import com.example.blackjack.ui.navigation.BlackjackDestination
 import com.example.blackjack.ui.navigation.BlackjackNavHost
-import com.example.blackjack.ui.theme.BlackjackTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BlackjackApp() {
+fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewModel, statisticsViewModel: StatisticsViewModel) {
+    // Le FAB et les écrans Mise/Partie lisent le même état et le même ViewModel.
+    val gameState by gameViewModel.uiState.collectAsStateWithLifecycle()
+    val resumeRound = gameState.roundBet != null && !gameState.canChangeBet
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: BlackjackDestination.HOME
@@ -112,11 +118,15 @@ fun BlackjackApp() {
             ExtendedFloatingActionButton(
                 modifier = Modifier.testTag("new_game_fab"),
                 onClick = {
-                    // Une nouvelle préparation ne restaure pas une ancienne table.
-                    navController.clearBackStack(BlackjackDestination.BET)
-                    navController.navigate(BlackjackDestination.BET) {
-                        popUpTo(BlackjackDestination.HOME)
-                        launchSingleTop = true
+                    if (resumeRound) {
+                        navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true }
+                    } else {
+                        // Une nouvelle préparation ne restaure pas une ancienne table.
+                        navController.clearBackStack(BlackjackDestination.BET)
+                        navController.navigate(BlackjackDestination.BET) {
+                            popUpTo(BlackjackDestination.HOME)
+                            launchSingleTop = true
+                        }
                     }
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -124,13 +134,18 @@ fun BlackjackApp() {
                 icon = {
                     Icon(painterResource(R.drawable.ic_add), contentDescription = null)
                 },
-                text = { Text(stringResource(R.string.new_game)) }
+                text = { Text(stringResource(if (resumeRound) R.string.resume_game else R.string.new_game)) }
             )
         }
     ) { innerPadding ->
         BlackjackNavHost(
             navController = navController,
-            modifier = Modifier.padding(innerPadding)
+            gameState = gameState,
+            gameViewModel = gameViewModel,
+            historyViewModel = historyViewModel,
+            statisticsViewModel = statisticsViewModel,
+            // Le FAB garde sa zone : aucun bouton défilant ne peut être caché dessous.
+            modifier = Modifier.padding(innerPadding).padding(bottom = 80.dp)
         )
     }
 }
@@ -148,12 +163,4 @@ private fun destinationIcon(route: String): Int = when (route) {
     BlackjackDestination.HISTORY -> R.drawable.ic_history
     BlackjackDestination.STATISTICS -> R.drawable.ic_statistics
     else -> R.drawable.ic_home
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun BlackjackAppPreview() {
-    BlackjackTheme {
-        BlackjackApp()
-    }
 }

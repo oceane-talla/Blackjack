@@ -1,35 +1,21 @@
 # Package ui.screens
 
-Ce package contient les écrans de l'application. Chaque écran est décrit
-par un composable, une fonction Compose qui affiche les données reçues et
-transmet les actions de l'utilisateur.
+Les écrans reçoivent un état et des callbacks (fonctions appelées lors des clics).
+Ils affichent les données, sans appeler Room ni calculer les règles du Blackjack.
 
-Fichiers et sous-packages présents, conformément à `ARCHITECTURE.md` :
+- HomeScreen : accueil et cartes décoratives, bouton vers la mise ou la partie active.
+- BetScreen : solde, jetons de sélection rapide, curseur entier de 1 à 100, distribution.
+- GameScreen : mains, totaux, carte cachée, Tirer/Rester, règlement et sauvegarde.
+- HistoryScreen : liste Room observable, chargement, liste vide et erreur de lecture.
+- StatisticsScreen : indicateurs calculés par SQLite, chargement et erreur de lecture.
 
-- `home/HomeScreen.kt` : afficher l'accueil et transmettre l'action pour
-  commencer une partie.
-- `bet/BetScreen.kt` : afficher le solde, la mise sélectionnée et les
-  contrôles de mise.
-- `game/GameScreen.kt` : afficher la table, les cartes et les actions du jeu.
-- `history/HistoryScreen.kt` : afficher les parties enregistrées.
-- `statistics/StatisticsScreen.kt` : afficher les statistiques demandées.
+ScreenContent fournit le défilement vertical. HistoryScreen utilise LazyColumn pour
+ne composer que les lignes visibles d’un historique potentiellement long.
 
-Exemple prévu : le joueur appuie sur « Tirer ». `GameScreen` appelle le
-callback `onHit`, une fonction reçue en paramètre. Celui-ci transmet l'action
-au `GameViewModel`, qui appelle le modèle et actualise l'état affiché.
+Exemple : Tirer → onHit → GameViewModel.hit → BlackjackGame.hit → nouvel état.
+À la fin : ViewModel → Repository → DAO → Room, puis les Flow de lecture actualisent
+l’historique et les statistiques. Les boutons lisent canHit/canStand/canStartGame :
+ils n’essaient pas de reproduire les règles du modèle.
 
-Les écrans affichent les résultats des règles du Blackjack sans les
-calculer eux-mêmes. Pour les données persistées, le chemin prévu est :
-Compose → ViewModel → Repository → DAO → Room → SQLite.
-
-Pour PB-02, les cinq écrans utilisent `ScreenContent` pour partager
-l'espacement et le défilement. L'accueil mène à la mise avec `onStartGame`.
-L'écran de mise appelle `onOpenTable` lorsque « Voir la table » est pressé.
-La table appelle `onNewGame` lorsque « Changer la mise » est pressé.
-Ces callbacks sont des fonctions reçues en paramètre; le NavHost leur
-donne une action de navigation.
-
-Les écrans de mise, de table, d'historique et de statistiques sont
-provisoires : ils permettent de vérifier la navigation, sans prétendre
-gérer une mise, distribuer des cartes ou lire une base. Les fonctionnalités
-du jeu et les données restent à construire dans leurs PBI respectifs.
+La mise est bloquée pendant le jeu et tant que sa sauvegarde n’est pas résolue.
+La partie standard est branchée; Split reste une étape distincte.

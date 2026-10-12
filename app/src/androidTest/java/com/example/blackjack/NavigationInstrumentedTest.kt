@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -43,28 +44,29 @@ class NavigationInstrumentedTest {
             composeRule.activity.resources.configuration.orientation == expectedOrientation
         }
         assertEquals(expectedOrientation, composeRule.activity.resources.configuration.orientation)
+        composeRule.waitUntil(10_000) { !composeRule.activity.gameViewModel.uiState.value.isLoadingBalance }
     }
 
     @Test
     fun homeToTableAndBack() {
-        composeRule.onNodeWithText(text(R.string.start_game)).performClick()
-        composeRule.onNodeWithText(text(R.string.bet_title)).assertIsDisplayed()
-        composeRule.onNodeWithText(text(R.string.open_table)).performClick()
-        composeRule.onNodeWithText(text(R.string.game_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.start_game)).performScrollTo().performClick()
+        composeRule.onNodeWithText(text(R.string.bet_title)).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.open_table)).performScrollTo().performClick()
+        composeRule.onNodeWithText(text(R.string.game_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("navigation_bet").assertIsSelected()
 
         composeRule.onNodeWithContentDescription(text(R.string.navigate_back)).performClick()
-        composeRule.onNodeWithText(text(R.string.bet_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.bet_title)).performScrollTo().assertIsDisplayed()
         pressSystemBack()
-        composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun homeTabReturnsFromTheHomePlayButton() {
-        composeRule.onNodeWithText(text(R.string.start_game)).performClick()
-        composeRule.onNodeWithText(text(R.string.bet_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.start_game)).performScrollTo().performClick()
+        composeRule.onNodeWithText(text(R.string.bet_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("navigation_home").performTouchInput { click() }
-        composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("navigation_home").assertIsSelected()
     }
 
@@ -72,58 +74,67 @@ class NavigationInstrumentedTest {
     fun homeTabRespondsToTouchAfterPlayingAndRestoringTabs() {
         repeat(3) {
             composeRule.onNodeWithTag("navigation_bet").performTouchInput { click() }
-            composeRule.onNodeWithText(text(R.string.bet_title)).assertIsDisplayed()
+            composeRule.onNodeWithText(text(R.string.bet_title)).performScrollTo().assertIsDisplayed()
             composeRule.onNodeWithTag("navigation_home").performTouchInput { click() }
-            composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+            composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
             composeRule.onNodeWithTag("navigation_home").assertIsSelected()
 
             composeRule.onNodeWithTag("navigation_bet").performTouchInput { click() }
-            composeRule.onNodeWithText(text(R.string.open_table)).performClick()
+            composeRule.onNodeWithText(text(R.string.open_table)).performScrollTo().performClick()
             composeRule.onNodeWithTag("navigation_history").performTouchInput { click() }
             composeRule.onNodeWithTag("navigation_statistics").performTouchInput { click() }
             composeRule.onNodeWithTag("navigation_bet").performTouchInput { click() }
-            composeRule.onNodeWithText(text(R.string.game_title)).assertIsDisplayed()
+            composeRule.onNodeWithText(text(R.string.game_title)).performScrollTo().assertIsDisplayed()
+            finishRound()
             composeRule.onNodeWithTag("navigation_home").performTouchInput { click() }
-            composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+            composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
             composeRule.onNodeWithTag("navigation_home").assertIsSelected()
             composeRule.onNodeWithTag("new_game_fab").performClick()
             composeRule.onNodeWithTag("navigation_home").performTouchInput { click() }
-            composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+            composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
         }
     }
 
     @Test
     fun tabsRestoreTheGameAndDoNotStackDuplicates() {
         composeRule.onNodeWithTag("navigation_bet").performClick()
-        composeRule.onNodeWithText(text(R.string.open_table)).performClick()
+        composeRule.onNodeWithText(text(R.string.open_table)).performScrollTo().performClick()
         composeRule.onNodeWithTag("navigation_history").performClick()
-        composeRule.onNodeWithText(text(R.string.history_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.history_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("navigation_statistics").performClick()
-        composeRule.onNodeWithText(text(R.string.statistics_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.statistics_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("navigation_bet").performClick()
-        composeRule.onNodeWithText(text(R.string.game_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.game_title)).performScrollTo().assertIsDisplayed()
 
         composeRule.onNodeWithTag("navigation_home").performClick()
-        composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("navigation_history").performClick()
         composeRule.onNodeWithTag("navigation_history").performClick()
         pressSystemBack()
-        composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun newGameFabOpensTheBetWithoutStackingIt() {
         composeRule.onNodeWithTag("navigation_bet").performClick()
-        composeRule.onNodeWithText(text(R.string.open_table)).performClick()
+        composeRule.onNodeWithText(text(R.string.open_table)).performScrollTo().performClick()
+        finishRound()
         composeRule.onNodeWithTag("navigation_statistics").performClick()
         composeRule.onNodeWithTag("new_game_fab").performClick()
-        composeRule.onNodeWithText(text(R.string.bet_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.bet_title)).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("new_game_fab").performClick()
         composeRule.onNodeWithTag("navigation_history").performClick()
         composeRule.onNodeWithTag("navigation_bet").performClick()
-        composeRule.onNodeWithText(text(R.string.bet_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.bet_title)).performScrollTo().assertIsDisplayed()
         pressSystemBack()
-        composeRule.onNodeWithText(text(R.string.home_title)).assertIsDisplayed()
+        composeRule.onNodeWithText(text(R.string.home_title)).performScrollTo().assertIsDisplayed()
+    }
+
+    private fun finishRound() {
+        if (composeRule.activity.gameViewModel.uiState.value.canStand) {
+            composeRule.onNodeWithTag("stand_button").performScrollTo().performClick()
+        }
+        composeRule.waitUntil(15_000) { composeRule.activity.gameViewModel.uiState.value.savedGameId != null }
     }
 
     private fun text(resourceId: Int): String = composeRule.activity.getString(resourceId)

@@ -110,6 +110,20 @@ class BlackjackGame internal constructor(private val drawCard: () -> Card?) {
         return phase != GamePhase.INTERRUPTED
     }
 
+    fun validateBet(amount: Int, availableChips: Double): Boolean =
+        amount in 1..100 && availableChips.isFinite() && amount <= availableChips
+
+    // Vérifie seulement l'admissibilité : cette fonction ne sépare aucune carte.
+    // availableChips est le solde avant règlement, puisque la mise n'est pas débitée au départ.
+    fun canSplit(bet: Int, availableChips: Double): Boolean {
+        val cards = playerHand.cards
+        return phase == GamePhase.PLAYER_TURN &&
+            cards.size == 2 &&
+            cards[0].rank == cards[1].rank &&
+            validateBet(bet, availableChips) &&
+            availableChips >= bet * 2.0
+    }
+
     fun calculateChipChange(bet: Int): Double {
         require(bet > 0) { "The bet must be positive." }
         check(phase == GamePhase.FINISHED) {

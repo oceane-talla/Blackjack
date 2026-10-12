@@ -22,6 +22,9 @@ Fichiers présents, créés dans les blocs choisis le 8 octobre 2026 :
 - `DealtCard.kt` : représenter une carte distribuée, son destinataire
   (`handNumber = 1` pour le joueur, `null` pour le croupier) et son ordre
   global de distribution, à partir de 1.
+- `GameStatistics.kt` : recevoir les résultats calculés par SQLite (compteurs,
+  gains, pertes, mises et proportions de cartes). Cette `data class` ne contient
+  ni règles du jeu, ni SQL, ni annotation `@Entity` : elle ne crée pas de table.
 
 `Hand.cards` fournit une copie de la liste : la main se modifie par
 `addCard()`. `remainingCards` indique la taille de la réserve du sabot.
@@ -89,9 +92,12 @@ une partie terminée et une mise positive : défaite `-bet`, égalité `0`,
 victoire ordinaire `+bet`, Blackjack naturel gagnant `+1.5 * bet`, selon
 le choix A de l'utilisateur. Deux Blackjacks naturels restent une égalité.
 La fonction ne modifie pas un solde : celui-ci sera géré à son étape.
-Les limites de mise, la gestion du solde et le Split restent à implémenter.
-Les écrans et ViewModels ne sont pas encore branchés à ces classes;
-le masquage de la carte du croupier sera géré lors de ce branchement.
+`validateBet(amount, availableChips)` accepte les montants de 1 à 100
+qui ne dépassent pas un solde fini. `GameViewModel` utilise cette validation
+et applique la variation nette au solde une seule fois à la fin de la partie.
+Le Split reste à implémenter.
+Les écrans ne sont pas encore branchés; le ViewModel fournit déjà un
+état qui masque la deuxième carte du croupier pendant le tour du joueur.
 
 Les tests se trouvent dans `app/src/test/java/com/example/blackjack/model` :
 `CardTest`, `HandTest`, `ShoeTest` et `BlackjackGameTest`. Ils s'exécutent
@@ -112,3 +118,7 @@ pour le suivi des cartes et le calcul des jetons. Les 48 tests de
 `BlackjackGameTest` passent avec les 21 autres tests métier et le test
 d'exemple : 70 tests Kotlin réussis. Les scénarios et commandes sont
 consignés dans la section 9 de `ARCHITECTURE.md`.
+
+Après ajout de `validateBet`, quatre tests complémentaires passent :
+52 tests dans `BlackjackGameTest`, 74 tests Kotlin au total. Le bloc
+ViewModel est aussi vérifié par 15 tests Android sur Pixel 8.

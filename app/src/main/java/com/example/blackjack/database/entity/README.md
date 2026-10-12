@@ -1,5 +1,9 @@
 # Package database.entity
 
+Depuis le 12 octobre 2026, `PlayerBalanceEntity` représente le solde du
+joueur dans `player_balance`. Sa seule ligne utilise l'identifiant 1 et un
+`Double` pour les demi-jetons. Ce solde est indépendant des tables d'historique.
+
 Ce package contient les Entity de Room : les classes qui décrivent les
 tables. Chaque objet Entity représente une ligne enregistrée.
 
@@ -47,8 +51,9 @@ des règles du jeu en mémoire.
 Room 3.0.3, le DAO et la base sont maintenant configurés. Le compilateur
 Room valide le schéma et génère les insertions et lectures. Les tests
 Android `BlackjackDaoTest.kt` vérifient les relations et l'unicité avec
-SQLite. Le repository et l'instance partagée dans l'application restent
-à créer : les parties jouées ne sont pas encore enregistrées par l'UI.
+SQLite. Le repository et `GameViewModel` utilisent ces Entity. L'instance
+partagée et le branchement aux écrans restent à faire : les parties
+jouées ne sont pas encore enregistrées par l'UI.
 Cette étape avance PB-10 et PB-11.
 
 Vérification du 8 octobre 2026 : la compilation avec Room 3.0.3 réussit

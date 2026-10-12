@@ -605,6 +605,104 @@ class BlackjackGameTest {
         }
     }
 
+    @Test
+    fun betValidationAcceptsTheLimitsWhenTheyAreAffordable() {
+        val game = gameWith()
+        assertTrue(game.validateBet(1, 1.0))
+        assertTrue(game.validateBet(100, 100.0))
+        assertTrue(game.validateBet(50, 1_000.0))
+    }
+
+    @Test
+    fun betValidationRejectsAmountsOutsideOneToOneHundred() {
+        val game = gameWith()
+        for (bet in listOf(-1, 0, 101, Int.MAX_VALUE)) {
+            assertFalse(game.validateBet(bet, 1_000.0))
+        }
+    }
+
+    @Test
+    fun betValidationUsesTheAvailableBalanceIncludingHalfChips() {
+        val game = gameWith()
+        assertTrue(game.validateBet(1, 1.5))
+        assertFalse(game.validateBet(2, 1.5))
+        assertFalse(game.validateBet(1, 0.5))
+        assertFalse(game.validateBet(1, 0.0))
+    }
+
+    @Test
+    fun betValidationRejectsInvalidBalances() {
+        val game = gameWith()
+        for (chips in listOf(-1.0, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+            assertFalse(game.validateBet(1, chips))
+        }
+    }
+
+    @Test
+    fun splitAcceptsPairsOfTheSameRankIncludingAcesAndFigures() {
+        for (rank in Rank.entries) {
+            val game = gameWith(rank, Rank.TEN, rank, Rank.SEVEN)
+            assertTrue(game.startRound())
+            assertTrue(game.canSplit(10, 20.0))
+        }
+    }
+
+    @Test
+    fun splitRejectsDifferentRanksEvenWhenBothCardsAreWorthTen() {
+        for (otherRank in listOf(Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.NINE)) {
+            val game = gameWith(Rank.KING, Rank.TEN, otherRank, Rank.SEVEN)
+            game.startRound()
+            assertFalse(game.canSplit(10, 1_000.0))
+        }
+    }
+
+    @Test
+    fun splitRequiresEnoughChipsForBothBetsWithoutLimitingTheirCombinedTotalToOneHundred() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN)
+        game.startRound()
+        assertFalse(game.canSplit(25, 49.5))
+        assertTrue(game.canSplit(25, 50.0))
+        assertTrue(game.canSplit(100, 200.0))
+        for (bet in listOf(-1, 0, 101, Int.MAX_VALUE)) {
+            assertFalse(game.canSplit(bet, 1_000.0))
+        }
+        for (chips in listOf(-1.0, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+            assertFalse(game.canSplit(10, chips))
+        }
+    }
+
+    @Test
+    fun splitIsUnavailableBeforeTheRoundAfterHittingAfterFinishingAndAfterInterruption() {
+        val ready = gameWith()
+        assertFalse(ready.canSplit(10, 1_000.0))
+        val hit = gameWith(Rank.FIVE, Rank.TEN, Rank.FIVE, Rank.SEVEN, Rank.TWO)
+        hit.startRound()
+        hit.hit()
+        assertFalse(hit.canSplit(10, 1_000.0))
+        val finished = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN)
+        finished.startRound()
+        finished.stand()
+        assertFalse(finished.canSplit(10, 1_000.0))
+        val interrupted = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT)
+        interrupted.startRound()
+        assertFalse(interrupted.canSplit(10, 1_000.0))
+    }
+
+    @Test
+    fun checkingSplitDoesNotChangeCardsPhaseDistributionOrResult() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN)
+        game.startRound()
+        val cards = game.playerCards
+        val dealer = game.dealerCards
+        val dealt = game.dealtCards
+        repeat(2) { assertTrue(game.canSplit(10, 20.0)) }
+        assertEquals(cards, game.playerCards)
+        assertEquals(dealer, game.dealerCards)
+        assertEquals(dealt, game.dealtCards)
+        assertEquals(GamePhase.PLAYER_TURN, game.phase)
+        assertNull(game.result)
+    }
+
     private fun gameWith(vararg ranks: Rank): BlackjackGame {
         val cards = ranks.mapIndexed { index, rank ->
             Card(rank, Suit.entries[index % Suit.entries.size])

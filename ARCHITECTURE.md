@@ -1,12 +1,12 @@
 # Blackjack Android — rôle des fichiers et fonctions prévues
 
-Document de travail mis à jour le 8 octobre 2026, basé sur notre discussion et les contraintes consignées dans `AGENTS.md`.
+Document de travail mis à jour le 12 octobre 2026, basé sur notre discussion et les contraintes consignées dans `AGENTS.md`.
 
 ## Comment lire ce document
 
 Ce document décrit la structure visée et sert à comprendre où placer chaque responsabilité. Les noms des fonctions proposées pourront être ajustés ensemble avant leur implémentation. Leur présence ici ne signifie pas que le code existe déjà ni que toutes les décisions sont prises.
 
-**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont provisoires : la navigation est implémentée, mais le branchement du jeu à l'interface, les mises et la persistance dans les écrans restent à construire. `Card`, `Hand`, `Shoe`, `DealtCard` et la partie standard de `BlackjackGame` sont implémentés dans le package `model`, avec le suivi des distributions et le calcul de variation nette des jetons, sans branchement aux écrans. Room 3.0.3 et KSP sont configurés; les trois Entity, `BlackjackDao`, `BlackjackDatabase` et `BlackjackRepository` existent. Les ViewModels et l'instance partagée dans `BlackjackApplication` restent à créer. Les vérifications figurent à la section 9.
+**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont branchés aux ViewModels : mise, partie standard, historique et statistiques sont affichés dans une interface verte et dorée. Les vérifications de cette intégration sont consignées à la fin du document. `Card`, `Hand`, `Shoe`, `DealtCard` et la partie standard de `BlackjackGame` sont implémentés, avec le suivi des distributions, la validation des mises et le calcul de variation nette des jetons. Room 3.0.3 et KSP sont configurés; les quatre Entity (dont `PlayerBalanceEntity` pour le solde), `BlackjackDao`, `BlackjackDatabase` et `BlackjackRepository` existent. `GameViewModel` et `GameUiState` coordonnent le jeu, le solde et la sauvegarde. `HistoryViewModel` et `StatisticsViewModel` exposent les lectures observables du repository, avec leurs états d'affichage. Les statistiques sont calculées par SQLite et retournées dans `GameStatistics`. `BlackjackApplication` partage la base et le repository; `BlackjackViewModelFactory` construit les trois ViewModels, récupérés avec une portée Activity dans `MainActivity`. Le branchement observe les StateFlow avec collectAsStateWithLifecycle(). Les vérifications figurent à la section 9.
 
 `HomeScreen` est conservé conformément à ton choix et se trouve maintenant dans `ui/screens/home`. La navigation a été extraite dans `ui/navigation/BlackjackNavHost.kt`.
 
@@ -31,7 +31,7 @@ com.example.blackjack
 │   │   └── statistics/StatisticsScreen.kt
 │   ├── components
 │   │   ├── ScreenContent.kt
-│   │   └── PlayingCard.kt
+│   │   └── CasinoComponents.kt
 │   └── theme
 │       ├── Color.kt
 │       ├── Theme.kt
@@ -39,15 +39,20 @@ com.example.blackjack
 │
 ├── viewmodel
 │   ├── GameViewModel.kt
+│   ├── GameUiState.kt
+│   ├── BlackjackViewModelFactory.kt
 │   ├── HistoryViewModel.kt
-│   └── StatisticsViewModel.kt
+│   ├── HistoryUiState.kt
+│   ├── StatisticsViewModel.kt
+│   └── StatisticsUiState.kt
 │
 ├── model
 │   ├── Card.kt
 │   ├── Hand.kt
 │   ├── Shoe.kt
 │   ├── BlackjackGame.kt
-│   └── DealtCard.kt
+│   ├── DealtCard.kt
+│   └── GameStatistics.kt
 │
 ├── repository
 │   └── BlackjackRepository.kt
@@ -58,7 +63,8 @@ com.example.blackjack
     └── entity
         ├── GameEntity.kt
         ├── HandEntity.kt
-        └── DrawnCardEntity.kt
+        ├── DrawnCardEntity.kt
+        └── PlayerBalanceEntity.kt
 ```
 
 ## Répartition générale des responsabilités
@@ -94,6 +100,8 @@ Les règles du jeu suivent aussi un chemin plus court : `Compose → ViewModel �
 | `setContent { ... }` | Installer l'interface Compose. C'est un appel Android existant. |
 | `BlackjackTheme { BlackjackApp() }` | Appliquer le thème et afficher le composable racine. |
 | `WindowCompat.getInsetsController(...)` | Configurer des icônes système claires pour le fond casino sombre. |
+| `viewModelFactory` | Fournir le repository de l'Application aux constructeurs des ViewModels. |
+| `gameViewModel`, `historyViewModel`, `statisticsViewModel` | Récupérer les instances conservées au niveau de l'Activity, au premier accès. |
 
 **Pourquoi ce fichier reste petit :** Android gère le démarrage; les détails des écrans appartiennent à `ui`. Il ne calcule pas les mains et n'exécute pas de requêtes SQL.
 
@@ -112,9 +120,34 @@ Ce fichier correspond à une classe Android `Application`. Il est différent de 
 | Propriété `database` | Fournir l'instance partagée de `BlackjackDatabase`. |
 | Propriété `repository` | Fournir `BlackjackRepository`, construit avec le DAO de cette base. |
 
-Une initialisation différée avec `lazy` pourra créer ces objets lors du premier accès. Il n'est pas nécessaire d'ajouter une fonction `onCreate()` vide : on ne l'ajoutera que si une initialisation concrète le demande.
+Les deux propriétés sont implémentées avec `by lazy` : le premier accès crée
+l'objet, puis les suivants retournent la même instance pour ce processus.
+La base utilise `applicationContext`, `AndroidSQLiteDriver` et le fichier
+`blackjack.db`. Aucune méthode `onCreate()` vide n'est nécessaire.
 
-**Intégration à prévoir :** déclarer cette classe dans le manifeste Android et fournir le repository aux ViewModels. Le mécanisme simple de création des ViewModels sera expliqué et choisi à cette étape.
+**Intégration actuelle :** le manifeste déclare
+`android:name=".BlackjackApplication"`. `MainActivity` récupère son repository
+pour construire `BlackjackViewModelFactory`, selon la méthode d'Atelier3.
+Les tables et la version du schéma ne changent pas.
+
+### viewmodel/BlackjackViewModelFactory.kt
+
+La Factory reçoit le repository partagé. `create(modelClass)` construit un
+`GameViewModel`, `HistoryViewModel` ou `StatisticsViewModel` selon la classe
+demandée; une autre classe provoque une erreur explicite. La conversion `as T`
+est limitée au résultat de ces branches qui vérifient le type demandé.
+
+Le choix A de l'utilisateur rattache les trois instances à l'Activity :
+`MainActivity` les récupère avec `ViewModelProvider(this, viewModelFactory)`
+dans des propriétés `by lazy`. Le Provider retrouve les ViewModels dans le
+ViewModelStore de l'Activity, y compris après une rotation. La Factory crée
+une instance seulement si elle n'y existe pas encore. Le passage d'un onglet
+à un autre ne détruit pas ces instances.
+
+Les propriétés sont transmises à Compose. Mise et Partie reçoivent le même
+`gameViewModel` de `MainActivity`. Aucun ViewModel n'est construit dans les
+écrans. Les instances ne sont pas conservées après un arrêt du processus;
+la conservation du solde après fermeture reste une décision séparée.
 
 ## 2. Package ui : interface et navigation
 
@@ -143,7 +176,8 @@ La barre inférieure conserve le parcours des onglets avec `saveState` et
 départ et ne restaure pas le parcours sauvegardé de Jouer.
 `popUpTo` retire les visites précédentes de la pile active,
 et `launchSingleTop` évite de dupliquer la destination au sommet. Le FAB
-ouvre une nouvelle préparation de partie, sans restaurer une ancienne table.
+ouvre une nouvelle préparation lorsque la partie précédente est sauvegardée;
+sinon, il reprend la partie active ou sa sauvegarde à réessayer.
 
 ### ui/navigation/BlackjackDestination.kt
 
@@ -163,9 +197,9 @@ Ce fichier contient un `object` avec cinq constantes de routes. Il ne possède p
 
 | Fonction prévue | À quoi elle sert |
 | --- | --- |
-| `BlackjackNavHost(navController, modifier)` | Définir le `NavHost`, la destination de départ et les écrans disponibles. D'autres paramètres pourront devenir nécessaires lors du branchement des ViewModels. |
+| `BlackjackNavHost(navController, gameState, gameViewModel, historyViewModel, statisticsViewModel, modifier)` | Définir les destinations, observer les lectures et relier les actions aux ViewModels. |
 
-Les blocs `composable(...)` déclareront les destinations. Les actions reçues des écrans déclencheront les appels à `navController.navigate(...)` ou le retour arrière.
+Les blocs `composable(...)` déclarent les destinations. Les actions reçues des écrans appellent les ViewModels et la navigation appropriée.
 
 **Pourquoi séparer ce fichier :** `BlackjackApp` organise la structure commune; `BlackjackNavHost` décrit les chemins entre écrans. La navigation ne contient pas les règles du Blackjack.
 
@@ -178,7 +212,7 @@ Les blocs `composable(...)` déclareront les destinations. Les actions reçues d
 | `HomeScreen(...)` | Afficher le contenu de l'accueil et transmettre l'action permettant d'aller à la mise. |
 | Paramètre `onStartGame` — prévu | Informer la navigation que l'utilisateur veut commencer. C'est une fonction reçue en paramètre, appelée un callback. |
 
-**État actuel :** `ui/screens/home/HomeScreen.kt` affiche l'accueil et son bouton de démarrage. `onStartGame` transmet l'action au NavHost, qui ouvre la mise. Aucun ViewModel dédié n'est nécessaire tant que cet écran ne gère pas de données qui le justifient.
+**État actuel :** l'accueil affiche deux cartes décoratives et son bouton de démarrage. `onStartGame` transmet l'action au NavHost, qui ouvre la mise ou reprend la partie active. Aucun ViewModel dédié n'est nécessaire.
 
 ### ui/screens/bet/BetScreen.kt
 
@@ -187,12 +221,13 @@ Les blocs `composable(...)` déclareront les destinations. Les actions reçues d
 | Fonction ou callback prévu | À quoi il sert |
 | --- | --- |
 | `BetScreen(...)` | Dessiner l'écran à partir de l'état fourni. |
-| `onBetChanged(amount)` | Transmettre le montant choisi au `GameViewModel`. |
-| `onConfirmBet()` | Demander le lancement de la partie. |
+| `onSelectBet(amount)` | Transmettre le montant choisi au `GameViewModel`. |
+| `onOpenTable()` | Demander le lancement de la partie. |
+| `onResume()` | Reprendre une partie qui interdit actuellement de changer la mise. |
 
-Les valeurs des jetons, la mise minimale et la mise maximale restent à confirmer avec l'énoncé. L'écran peut désactiver un bouton selon l'état reçu, mais la validation réelle du montant ne dépend pas uniquement du bouton.
+La mise validée est un entier de 1 à 100, dans la limite du solde. Les jetons proposent 1, 5, 10, 25, 50 et 100; le curseur permet tous les entiers. La validation réelle reste dans le ViewModel et le modèle.
 
-**Étape PB-02 :** l'écran est provisoire. Le callback actuel `onOpenTable` sert au bouton « Voir la table » pour vérifier le parcours; aucune mise n'est encore sélectionnée ni transmise.
+**État actuel :** la sélection et la distribution sont branchées. Une partie active ou une sauvegarde non résolue propose uniquement Reprendre.
 
 ### ui/screens/game/GameScreen.kt
 
@@ -203,12 +238,13 @@ Les valeurs des jetons, la mise minimale et la mise maximale restent à confirme
 | `GameScreen(...)` | Afficher l'état actuel de la partie. |
 | `onHit()` | Transmettre « Tirer ». |
 | `onStand()` | Transmettre « Rester ». |
-| `onSplit()` | Transmettre la demande de séparation de la main, lorsque l'état l'autorise. |
+| `onSplit()` — futur | Split reste une étape distincte, sans bouton actuellement. |
 | `onNewGame()` | Demander une nouvelle partie selon le parcours validé. |
+| `onRetrySave()` | Relancer la sauvegarde échouée via le ViewModel. |
 
 **Limite :** cet écran ne calcule ni la valeur des As, ni le gagnant, ni le paiement. Il ne révèle pas non plus une carte cachée en affichant accidentellement le total complet du croupier.
 
-**Étape PB-02 :** l'écran présente les emplacements du croupier et du joueur. Seul `onNewGame` est actuellement branché, pour retourner à la mise; les cartes et les actions de jeu restent à construire.
+**État actuel :** cartes, totaux, Tirer/Rester, résultat, solde et sauvegarde sont affichés depuis GameUiState. Le changement de mise dépend de canChangeBet.
 
 ### ui/screens/history/HistoryScreen.kt
 
@@ -228,18 +264,19 @@ L'ouverture d'un détail de partie ne sera ajoutée que si elle est demandée ou
 | --- | --- |
 | `StatisticsScreen(...)` | Présenter les valeurs fournies par `StatisticsViewModel`. |
 
-Les indicateurs exacts et leur définition doivent être vérifiés dans l'énoncé avant d'écrire les requêtes. L'écran ne recompte pas lui-même toutes les parties.
+Les indicateurs sont ceux de GameStatistics, issus des choix validés pour les requêtes SQL. L'écran ne recompte pas lui-même les parties.
 
-### ui/components/PlayingCard.kt
+### ui/components/CasinoComponents.kt
 
 **Rôle :** fournir un composable réutilisable pour afficher une carte traditionnelle ou son dos.
 
 | Fonction prévue | À quoi elle sert |
 | --- | --- |
-| `PlayingCard(card, faceDown, modifier)` | Afficher la face de la carte ou le dos selon `faceDown`. Les paramètres seront ajustés si une carte cachée ne doit pas être transmise à l'UI. |
-| `cardDrawableResource(card)` — utilitaire privé éventuel | Associer le rang et la couleur de la carte à une ressource graphique Android. À ajouter uniquement si ce découpage facilite le code. |
+| `PlayingCard(card, modifier)` | Afficher la face de la carte ou le dos lorsque card vaut null, sans révéler la carte cachée à l'UI. |
+| `CasinoPanel`, `ValueRow` | Partager la présentation des panneaux et de leurs valeurs. |
+| `chipText`, `resultLabel` | Formater les nombres et choisir les ressources de résultat. |
 
-Les images seront des ressources du projet, par exemple dans `res/drawable`. La couleur d'une carte signifie ici pique, cœur, carreau ou trèfle, pas seulement rouge ou noir.
+Les images des quatre sortes et du dos sont des ressources vectorielles dans `res/drawable`. Le rang est superposé en texte. La sorte signifie pique, cœur, carreau ou trèfle, pas seulement rouge ou noir.
 
 **Pourquoi l'image ne va pas dans `Card` :** le modèle représente une carte de jeu; le composable connaît sa représentation Android.
 
@@ -279,6 +316,35 @@ Les états devront porter des noms explicites. Leur forme précise sera définie
 
 Le modèle reste responsable de la validité des actions. Le ViewModel transforme leur résultat en état affichable. Les écrans de mise et de partie devront accéder au **même** `GameViewModel` pendant leur parcours; créer une instance différente par écran ferait perdre la mise ou la partie.
 
+**État actuel — option B :** `GameViewModel` et `GameUiState` sont implémentés
+avec les choix de l'utilisateur : un paquet neuf par partie et variation
+nette du solde appliquée à la fin. `uiState` expose un `StateFlow` en lecture
+seule; le `MutableStateFlow` est privé. `selectBet`, `startGame`, `hit` et
+`stand` coordonnent le modèle. `validateBet` dans le modèle vérifie une mise
+de 1 à 100 et les jetons disponibles. Le solde initial est 1000, la mise 1,
+et la dernière mise valide est conservée entre les parties.
+
+`selectedBet` décrit la prochaine mise et `roundBet` celle de la partie
+en cours ou terminée. Le règlement ne se produit qu'une fois. Une partie
+interrompue ne produit aucun paiement ni enregistrement. Le ViewModel
+fournit une entrée `null` pour la deuxième carte du croupier et un total
+`null` pendant le tour du joueur, sans exposer ces valeurs cachées.
+
+La sauvegarde automatique passe par le repository dans `viewModelScope`.
+`isSaving` et `savedGameId` rendent son état observable. Les nouvelles
+parties et changements de mise attendent la fin de l'écriture. Un échec
+publie `SAVE_FAILED` et conserve la partie : `retrySave` reprend l'écriture
+avec la même date, sans repayer ni créer plusieurs tentatives simultanées.
+Les erreurs sont aussi journalisées; l'annulation d'une coroutine est
+propagée. Les messages et le contrôle de reprise seront définis avec l'UI.
+
+Le constructeur public reçoit seulement le repository, sans accès au DAO.
+Le constructeur interne reçoit une fonction créant le modèle pour les
+scénarios de test déterministes. Cette organisation reprend les mécanismes
+de `CalculViewModel` dans `Atelier3`, sans ajouter de dépendance.
+La Factory et l'instance partagée existent; Compose observe maintenant les états.
+La mise et le solde ne sont pas persistés après arrêt du processus.
+
 ### viewmodel/HistoryViewModel.kt
 
 **Rôle :** observer l'historique fourni par le repository et exposer un état lisible par l'écran.
@@ -290,6 +356,22 @@ Le modèle reste responsable de la validité des actions. Le ViewModel transform
 
 Une fonction `loadHistory()` n'est pas nécessaire si l'observation est continue. Une fonction pour consulter les cartes d'une partie sera ajoutée seulement si le détail fait partie du besoin.
 
+**État actuel — 9 octobre 2026 :** `HistoryViewModel` et `HistoryUiState`
+sont implémentés et commentés. Le ViewModel observe `repository.observeHistory()`
+dans `viewModelScope` et expose les parties, le chargement initial et une erreur
+éventuelle dans un `StateFlow`. Une erreur termine l'observation et conserve
+la dernière liste reçue; aucune reprise automatique n'est ajoutée.
+`HistoryScreen` est branché à cet état via le NavHost.
+
+La compilation de l'application et des tests Android réussit, avec 74 tests
+unitaires sans échec. Les quatre tests `HistoryViewModelTest` passent sur
+Pixel 8 : historique vide après chargement, tri date/identifiant décroissants,
+actualisation automatique après insertion dans Room et conservation de la
+dernière liste après une erreur de lecture simulée. Les bases de test sont
+isolées en mémoire. Les tests d'interface ne sont pas relancés car aucun
+écran n'est modifié. Ces preuves avancent PB-11 et PB-15 sans les déclarer
+terminés ni modifier le backlog Excel.
+
 ### viewmodel/StatisticsViewModel.kt
 
 **Rôle :** observer les statistiques du repository et les préparer pour l'affichage.
@@ -300,6 +382,40 @@ Une fonction `loadHistory()` n'est pas nécessaire si l'observation est continue
 | Observation de `repository.observeStatistics()` | Recevoir les agrégats provenant de SQLite. |
 
 Des fonctions de filtrage seront ajoutées uniquement si des filtres sont demandés. Aucun indicateur supplémentaire n'est décidé ici.
+
+**État actuel — 9 octobre 2026 :** `StatisticsViewModel` et `StatisticsUiState`
+observent `repository.observeStatistics()` dans `viewModelScope`. L'état expose
+le résumé `GameStatistics`, le chargement initial et une erreur éventuelle.
+Les calculs sont effectués en SQL, sans collection de parties à recompter dans
+Compose ou le ViewModel. Une erreur conserve les dernières valeurs et termine
+l'observation sans reprise automatique. L'annulation du ViewModel se propage
+normalement. `StatisticsScreen` affiche maintenant ces valeurs via le NavHost.
+
+### model/GameStatistics.kt
+
+Cette `data class` reçoit les colonnes de la requête de statistiques. Elle
+n'est pas une Entity et ne crée aucune table ni migration. Les choix C et A
+de l'utilisateur fixent les deux répartitions de cartes et les résultats par
+main. Définitions utilisées pour PB-13 :
+
+| Indicateur | Source et définition |
+| --- | --- |
+| Parties | Nombre de lignes de `games`, une seule même après Split. |
+| Mains et résultats | Lignes de `hands`, victoires, défaites et égalités par main. |
+| Blackjacks | Mains du joueur marquées naturelles, y compris en cas d'égalité. |
+| Gains | Somme des variations nettes positives des mains, sans les mises rendues. |
+| Pertes | Somme des variations négatives des mains, exprimée en montant positif. |
+| Mise moyenne et maximale | `AVG(totalBet)` et `MAX(totalBet)` par partie. |
+| Cartes | Toutes les lignes distribuées de `drawn_cards`, joueur et croupier. |
+| Rouge/noir | Cœurs + carreaux / trèfles + piques, parmi toutes les cartes. |
+| Quatre sortes | Cœur, carreau, trèfle et pique, parmi toutes les cartes. |
+
+Les pourcentages sont de 0 à 100 sans arrondi SQL. Sans cartes, ils valent
+`null`; sans parties, la mise moyenne et maximale valent aussi `null`.
+Les compteurs et sommes vides valent zéro. Une main gagnante et une perdante
+après Split alimentent chacune leur résultat et leur montant, même si le
+bilan de la partie est nul. Le résultat résumé du Split reste à définir pour
+l'historique : cette étape ne l'invente pas et ne rend pas le Split jouable.
 
 ## 4. Package model : règles du Blackjack
 
@@ -385,7 +501,9 @@ implémentées pour une seule main. `calculateChipChange(bet)` calcule aussi
 les jetons : `-bet` pour une défaite, `0` pour une égalité, `+bet` pour une
 victoire ordinaire et `+1.5 * bet` pour un Blackjack naturel gagnant,
 selon le choix A de l'utilisateur. Deux Blackjacks naturels donnent `0`.
-Les limites de mise, la gestion du solde et le Split restent à faire.
+`validateBet(amount, availableChips)` accepte une mise de 1 à 100 abordable
+avec un solde fini. `GameViewModel` applique la variation au solde à la fin.
+Le Split reste à faire.
 
 `DealtCard` et la liste `dealtCards` conservent l'ordre global et le
 destinataire de chaque carte effectivement distribuée. La liste exposée
@@ -454,14 +572,15 @@ Le repository ne remplace pas le moteur de jeu et ne décide pas qu'un As vaut 1
 La sauvegarde doit être **atomique** : on enregistre la partie, ses mains et ses cartes ensemble, ou rien. Une transaction au niveau du DAO permet d'éviter une partie enregistrée avec la moitié de ses cartes.
 
 **État actuel :** `BlackjackRepository` reçoit le DAO et implémente
-`saveFinishedGame(game, bet, playedAt)`, `observeHistory()`, `getHands(gameId)`
+`saveFinishedGame(game, bet, playedAt)`, `observeHistory()`, `observeStatistics()`, `getHands(gameId)`
 et `getDrawnCards(gameId)`. Il convertit la partie standard terminée en
 Entity, après avoir demandé au modèle `calculateChipChange(bet)`. La date
 peut être fournie explicitement; sinon l'heure de sauvegarde est utilisée.
 Le DAO remplace les identifiants provisoires et effectue la transaction.
 La méthode retourne l'identifiant généré et laisse remonter les erreurs.
-Le modèle actuel fournit une seule main; Split et statistiques attendent
-leur étape. Les ViewModels et l'instance partagée restent à créer.
+Le modèle actuel fournit une seule main; la sauvegarde du Split attend
+son étape. Les trois ViewModels, leur Factory et l'instance partagée existent;
+leur branchement aux écrans reste à faire.
 
 ## 6. Package database : Room et SQLite
 
@@ -497,7 +616,7 @@ Ces notions suivent la [documentation Android sur Room](https://developer.androi
 
 La classe est présente avec les trois Entity, `version = 1` et `exportSchema = false`, comme dans `Atelier3`. Elle est abstraite : Room génère sa classe concrète. Aucun fichier de schéma n'est exporté; une migration devra être décidée avant de modifier une base déjà utilisée. Aucune suppression automatique des données n'est configurée.
 
-Les tests ouvrent une base en mémoire ou un fichier réservé aux tests avec `AndroidSQLiteDriver`. L'instance de production sera créée et conservée par `BlackjackApplication`, à une étape ultérieure. Cette classe n'a pas besoin d'une méthode spécifique pour chaque requête.
+Les tests ouvrent une base en mémoire ou un fichier réservé aux tests avec `AndroidSQLiteDriver`. L'instance de production est créée et conservée par `BlackjackApplication`, au premier accès. Cette classe n'a pas besoin d'une méthode spécifique pour chaque requête.
 
 ### database/dao/BlackjackDao.kt
 
@@ -512,13 +631,17 @@ Les tests ouvrent une base en mémoire ou un fichier réservé aux tests avec `A
 | `observeHistory()` — `Flow` | Lire les parties par date décroissante, puis identifiant décroissant en cas de dates identiques, et publier les changements. |
 | `getHands(gameId)` — `suspend` | Lire les mains associées à une partie par numéro croissant. |
 | `getDrawnCards(gameId)` — `suspend` | Lire ses cartes par `drawOrder` croissant. |
-| `observeStatistics()` — prévu seulement | Les agrégats SQLite seront définis et implémentés à leur étape. |
+| `observeStatistics()` — `Flow<GameStatistics>` | Calculer et observer les compteurs, montants et proportions depuis les trois tables. |
 
 Toutes les fonctions de sauvegarde et d'historique du tableau sont implémentées dans l'interface `@Dao`. `@Insert` et `@Query` permettent à Room de générer les opérations. Dans une requête, `:gameId` reçoit le paramètre Kotlin du même nom.
 
 `insertGameWithDetails` récupère l'identifiant retourné par `insertGame`, puis utilise `map` et `copy` pour le donner aux mains et aux cartes sans modifier les objets reçus. Les mains sont insérées avant leurs cartes pour respecter les clés étrangères. `@Transaction` conserve toutes ces écritures ensemble ou annule tout si une insertion échoue. L'erreur remonte à l'appelant, sans remplacement automatique des lignes existantes.
 
-Les statistiques pourront utiliser `COUNT`, `SUM`, `AVG` ou `GROUP BY` si ces opérations correspondent aux indicateurs demandés. Nous choisirons les requêtes à partir du besoin, pas à partir d'une liste arbitraire de fonctions SQL.
+Les statistiques utilisent `COUNT`, `SUM`, `AVG`, `MAX` et `CASE WHEN`.
+Chaque table est résumée en une seule ligne, puis `CROSS JOIN` assemble
+ces trois résumés : les cartes ne multiplient donc pas les mises ou les gains.
+`COALESCE` donne zéro aux sommes vides et `NULLIF` évite une division par zéro.
+Room observe les trois tables pour publier les changements dans le même Flow.
 
 Une lecture observable retourne un `Flow`; une écriture ponctuelle utilise une fonction `suspend`. Ces mécanismes permettent les opérations asynchrones et les mises à jour observables décrites dans la [documentation Room sur les requêtes asynchrones](https://developer.android.com/training/data-storage/room/async-queries).
 
@@ -627,12 +750,9 @@ ajoutée. [Clés étrangères Room 3](https://developer.android.com/reference/an
 
 Ce document ne fixe pas silencieusement les éléments suivants :
 
-- nombre de jeux utilisé par l'application et moment du renouvellement du sabot entre les parties; `Shoe` renvoie déjà `null` lorsqu'il est vide et `BlackjackGame` interrompt la partie sans résultat;
-- solde initial, limites de mise et traitement durable du solde après fermeture;
-- application de la variation nette au solde : le modèle calcule déjà le gain ou la perte, avec Blackjack naturel gagnant à 1,5 fois la mise selon le choix A; la gestion du solde reste à intégrer sans retirer la mise deux fois;
+- conservation durable du solde et de la mise après fermeture : le ViewModel commence à 1000 jetons, accepte les mises de 1 à 100 et garde la mise entre les parties en mémoire;
 - conditions détaillées du Split; l'arrêt sur tout 17 est appliqué dans la partie standard selon le critère PB-07;
 - convention du résultat résumé d'une partie dont les mains ont des résultats différents après Split; la structure à trois tables est choisie et chaque main conserve déjà son résultat propre;
-- statistiques exactes exigées et leur unité de comptage : partie ou main;
 - détails des maquettes de jeu, de mise et des données (pour PB-02, les barres et le FAB sont validés avec l'option B).
 
 Ces décisions devront être vérifiées dans l'énoncé puis discutées lorsque nécessaire. Si l'énoncé impose une règle, cette règle prévaut sur une proposition de ce document.
@@ -795,6 +915,148 @@ et PB-15 sans déclarer ces PBI terminés ni modifier le backlog Excel.
 Les ViewModels, l'instance partagée, le solde, le branchement aux écrans,
 le Split et les statistiques restent à implémenter et à tester à leur étape.
 
+### Vérifications de GameViewModel — 8 octobre 2026
+
+L'option B est implémentée avec les choix explicites : paquet neuf d'un
+jeu par partie et variation nette appliquée au solde à la fin. Les outils
+AndroidX déjà présents suffisent; aucune dépendance n'est ajoutée.
+
+La première compilation des tests utilisait une version du code antérieure
+à l'ajout de `roundBet` et a échoué sur ce champ. Après relance complète
+sur les sources finales, l'application et les tests Android compilent.
+Les 74 tests Kotlin passent : 73 tests métier et le test d'exemple,
+sans échec, erreur ni test ignoré. Quatre nouveaux tests couvrent la
+validation des mises entre 1 et 100 avec le solde disponible.
+
+```text
+gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Sur un Pixel 8 temporaire, les 15 tests `GameViewModelTest`, les 12 tests
+repository et les 15 tests DAO passent ensemble (42 tests Android).
+Les nouveaux tests vérifient les 1000 jetons initiaux, la sélection et la
+conservation de mise, les actions refusées pendant le jeu ou l'écriture,
+la deuxième carte et le total cachés du croupier, la publication StateFlow,
+la révélation finale, les paiements ordinaires et naturels avec demi-jetons,
+les égalités, le dépassement et le tour automatique après 21.
+Ils vérifient également les interruptions sans paiement ni sauvegarde,
+les nouvelles parties avec un modèle neuf, l'indépendance de la prochaine
+mise et de la mise de la partie terminée, l'épuisement du solde et les
+sauvegardes uniques. Un DAO déléguant à Room simule uniquement l'échec
+de la première écriture : la reprise conserve le paiement et n'enregistre
+qu'une seule partie, sans tentatives simultanées.
+
+Les actions du ViewModel sont exécutées sur le thread principal Android.
+Les bases sont isolées en mémoire et les ViewModelStore sont nettoyés
+pour annuler les coroutines après les tests. Les autres tests de persistance
+conservent leurs fichiers réservés aux tests et les suppriment ensuite.
+
+```text
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.viewmodel.GameViewModelTest,com.example.blackjack.repository.BlackjackRepositoryTest,com.example.blackjack.database.BlackjackDaoTest com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+L'émulateur temporaire est fermé après vérification. Les tests de navigation
+et de rotation ne sont pas relancés : les écrans ne sont pas modifiés et
+ne sont pas encore branchés au ViewModel. La conservation lors de la rotation
+devra être vérifiée après création et partage de l'instance par Android.
+
+Ces résultats peuvent alimenter la Sprint Review pour PB-05, PB-06, PB-07,
+PB-10, PB-11 et PB-15 sans déclarer ces PBI terminés ni modifier le backlog
+Excel. La Factory, l'instance Room partagée, le branchement Compose, les
+autres ViewModels, le Split et les statistiques restent à leurs étapes.
+
+### Vérifications des statistiques — 9 octobre 2026
+
+Les choix C et A sont implémentés : proportions rouge/noir et par sorte,
+résultats par main avec nombre de parties distinct. Aucun schéma ni dépendance
+ne change. `GameStatistics`, `StatisticsUiState` et `StatisticsViewModel`
+sont ajoutés; `observeStatistics()` traverse le repository jusqu'au DAO.
+
+La compilation de l'application et des tests Android réussit. Les 74 tests
+unitaires passent, sans erreur ni échec, avec la commande :
+
+```text
+gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Sur Pixel 8, les six tests `BlackjackStatisticsTest` et les cinq tests
+`StatisticsViewModelTest` passent avec les 46 tests existants d'historique,
+jeu, repository et DAO : 57 tests Android réussis. La première tentative
+s'est arrêtée avant les tests; les journaux montraient aussi une ANR système
+pendant le démarrage de l'émulateur. La relance après démarrage réussit.
+
+Les tests vérifient la base vide, les proportions nulles sans cartes,
+les sortes absentes à zéro lorsqu'il existe d'autres cartes, les proportions
+fractionnaires, la mise moyenne fractionnaire, les gains avec demi-jetons,
+les pertes positives et la mise maximale totale par partie. Le jeu de données
+de trois parties et quatre mains vérifie un Split gagnant/perdant et une
+égalité avec Blackjack naturel : les cartes ne multiplient pas les montants.
+Un simple total de 21 sans le marqueur naturel n'est pas compté comme Blackjack.
+
+Le même Flow réagit aux insertions dans chacune des trois tables. Une vraie
+partie du modèle, sauvegardée par le repository, actualise le ViewModel déjà
+créé. Les tests vérifient aussi le chargement, les erreurs avant et après un
+premier résultat, la conservation des dernières valeurs et l'annulation de
+l'observation lors du nettoyage du ViewModelStore. Les erreurs de lecture sont
+simulées uniquement dans ces tests; les calculs utilisent Room et SQLite réels.
+
+```text
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.database.BlackjackStatisticsTest,com.example.blackjack.viewmodel.StatisticsViewModelTest,com.example.blackjack.viewmodel.HistoryViewModelTest,com.example.blackjack.viewmodel.GameViewModelTest,com.example.blackjack.repository.BlackjackRepositoryTest,com.example.blackjack.database.BlackjackDaoTest com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Les bases sont isolées et les coroutines nettoyées. Le Pixel 8 temporaire est
+fermé après vérification. Les tests d'interface et de rotation ne sont pas
+relancés : aucun écran n'est modifié. Le Split jouable, la Factory, l'instance
+Room partagée et le branchement aux écrans restent à leurs étapes.
+Ces résultats peuvent alimenter la Sprint Review pour PB-13 et PB-15.
+PB-14 attend l'interface; aucun PBI n'est déclaré terminé et l'Excel est inchangé.
+
+### Vérifications des objets partagés et de la Factory — 9 octobre 2026
+
+Le choix A est implémenté avec `BlackjackApplication`, sa déclaration dans
+le manifeste, `BlackjackViewModelFactory` et les propriétés de `MainActivity`.
+La base, le repository et les ViewModels sont créés au premier accès.
+Le Provider rattache les ViewModels à l'Activity; les écrans ne les consomment
+pas encore. Aucune dépendance, table, règle du jeu ou navigation ne change.
+
+La compilation réussit et les 74 tests unitaires passent sans erreur ni échec :
+
+```text
+gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Les cinq tests `BlackjackViewModelFactoryTest` vérifient la construction des
+trois types, le refus d'un type inconnu, la réutilisation dans un même
+ViewModelStore malgré une nouvelle Factory, l'indépendance de deux stores
+et l'observation du repository fourni. Les écritures utilisent une base
+Room isolée en mémoire, avec nettoyage des stores et des coroutines.
+
+Les trois tests `SharedObjectsInstrumentedTest` vérifient l'Application
+déclarée, l'identité de la base et du repository, la conservation du
+GameViewModel lors de passages entre Mise, Partie et les autres onglets,
+et une vraie rotation. L'Activity est recréée, mais les trois ViewModels,
+les services partagés et la mise sélectionnée restent identiques. Ces tests
+ne sauvegardent aucune partie dans la base partagée de l'application.
+
+Sur Pixel 8, ces huit tests et les cinq tests de navigation en portrait
+passent ensemble : 13 tests réussis. La première tentative s'était arrêtée
+avant les tests; les journaux montraient une ANR de l'interface système au
+démarrage. La relance réussit. Les cinq tests de navigation passent ensuite
+en paysage, avec vérification de l'orientation : 18 exécutions Android
+réussies au total pour ce bloc.
+
+```text
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.viewmodel.BlackjackViewModelFactoryTest,com.example.blackjack.SharedObjectsInstrumentedTest,com.example.blackjack.NavigationInstrumentedTest -e orientation portrait com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.NavigationInstrumentedTest -e orientation landscape com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Le Pixel 8 temporaire est fermé après vérification. Les 57 tests Android des
+couches de jeu et de données, réussis au bloc précédent, ne sont pas relancés :
+leur code n'est pas modifié. La Factory a ses tests d'intégration dédiés.
+Le branchement Compose, le Split et la persistance du solde restent hors de
+ce bloc. Ces preuves soutiennent PB-10, PB-11 et PB-15 et peuvent être montrées
+en Sprint Review; aucun PBI n'est déclaré terminé et l'Excel est inchangé.
+
 ### Vérifications du PB-02 — 7 octobre 2026
 
 La compilation de l'application et des tests Android a réussi. Les cinq
@@ -828,3 +1090,208 @@ les règles du jeu et les données persistées restent à implémenter dans
 leurs PBI respectifs.
 
 **Lien avec le backlog :** ce document soutient PB-01 et décrit les responsabilités pour la suite. Il ne constitue pas une preuve que ces fonctionnalités sont terminées. On créera les fichiers progressivement, au moment où leur rôle devient nécessaire et après ton choix de l'étape.
+
+## Branchement des écrans — 9 octobre 2026
+
+Choix approuvé : interface casino verte et dorée, cartes traditionnelles et jetons
+colorés. Aucun changement des règles, du schéma Room ou des dépendances.
+
+Ordre d’exécution et rôle des fichiers :
+
+1. `MainActivity` récupère les trois ViewModels via la Factory et les passe à
+   `BlackjackApp`. Ils appartiennent à l’Activity : les écrans Mise et Partie
+   partagent donc le même `GameViewModel`.
+2. `BlackjackApp` observe `gameViewModel.uiState` avec
+   `collectAsStateWithLifecycle()`. Cette fonction transforme le StateFlow en état
+   Compose; une nouvelle valeur provoque l’actualisation des composables qui la
+   lisent. L’observation respecte le cycle de vie. Le FAB utilise cet état pour
+   afficher Nouvelle partie ou Reprendre la partie. Sa zone est réservée sous le
+   contenu : il ne recouvre pas les actions, même après défilement.
+3. `BlackjackNavHost` passe cet état et les fonctions à appeler aux écrans.
+   `onSelectBet` appelle `selectBet`, `onOpenTable` appelle `startGame` et ne navigue
+   que si la distribution est acceptée. `onHit`, `onStand` et `onRetrySave` appellent
+   directement les actions correspondantes du ViewModel. Un callback est simplement
+   une fonction reçue en paramètre, exécutée lorsqu’un bouton est pressé.
+4. `BetScreen` affiche le solde et la mise. Les jetons choisissent des montants
+   rapides; FlowRow remet les jetons à la ligne lorsque la largeur manque, sans
+   défilement horizontal imbriqué. Le Slider permet tous les entiers de 1 à 100. La validation reste dans
+   le ViewModel/modèle. Pendant une partie ou une sauvegarde non résolue, la mise
+   est remplacée par un bouton Reprendre.
+   Après une partie terminée, Changer la mise ouvre une préparation depuis la
+   racine Accueil, même lorsque la table a été reprise avec le FAB.
+5. `GameScreen` affiche les cartes et les totaux reçus. `HandPanel` présente une
+   main; `PlayingCard` affiche le rang et une ressource vectorielle de la sorte.
+   Une carte null affiche uniquement le dos et le texte accessible Carte face
+   cachée. `canHit` et `canStand` activent les actions, sans recalculer leurs règles.
+   Le résultat, la variation nette, l’enregistrement et les erreurs viennent de l’état.
+6. `HistoryScreen` reçoit `HistoryUiState` observé dans le NavHost. `LazyColumn`
+   construit les lignes visibles; l’identifiant Room est leur clé stable.
+   La date est formatée selon la langue. Chargement, liste vide et erreur sont
+   distincts; une erreur ne masque pas les dernières parties reçues.
+7. `StatisticsScreen` reçoit `StatisticsUiState` observé de la même façon et affiche
+   les valeurs de `GameStatistics`. Aucune somme ni proportion n’est recalculée
+   dans Compose. null est affiché par un tiret lorsque la base ne contient pas les
+   données nécessaires au calcul d’une moyenne ou d’un pourcentage.
+8. `CasinoComponents.kt` contient les panneaux, lignes de valeurs, cartes et petits
+   formateurs de présentation. `ScreenContent` conserve le défilement commun.
+   Les textes sont dans `values/strings.xml` et `values-en/strings.xml`; les images
+   des quatre sortes et du dos sont dans `res/drawable/card_*.xml`.
+
+Exemple de trajet complet : clic Rester → `GameViewModel.stand()` →
+`BlackjackGame.stand()` → résultat et variation → nouvel `GameUiState` → affichage.
+Le ViewModel sauvegarde ensuite avec le repository → DAO → Room → SQLite.
+Les Flow Room émettent alors les nouveaux résumés et statistiques → leurs
+ViewModels publient de nouveaux états → les écrans actualisent leur affichage.
+
+Limites conservées : une seule main jouable, Split non branché; le solde de jetons
+est conservé pendant la vie du ViewModel, mais pas restauré après arrêt du processus.
+Les erreurs de lecture sont affichées sans bouton de relance, car ces ViewModels
+ne proposent pas encore une fonction de relance. Une sauvegarde échouée possède,
+elle, une fonction de nouvelle tentative déjà implémentée.
+
+Vérification manuelle : choisir une mise, distribuer, changer d’onglet puis reprendre,
+terminer avec Tirer/Rester et vérifier le résultat, le solde, l’historique et les
+statistiques. Refaire en paysage et en anglais; faire défiler lorsque nécessaire.
+
+Questions de compréhension : pourquoi les écrans Mise et Partie reçoivent-ils le
+même état ? Après Rester, qui calcule le résultat et qui déclenche la sauvegarde ?
+
+### Vérifications de cette intégration
+
+Compilation finale réussie :
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Les 74 tests unitaires passent (73 métier et le test d’exemple). Les 68 clés de
+chaînes existent dans les deux langues, sans différence de noms. Aucun changement
+Room, du repository ou des règles métier dans ce bloc : les tests DAO/repository
+et statistiques déjà documentés n’ont pas été répétés sans modification de ces couches.
+
+Sur un Pixel 8 temporaire, trois tests déterministes GameplayUiInstrumentedTest
+utilisent une base Room en mémoire et les vrais ViewModels/repository :
+- mise de 10, victoire 19 contre 18 avec Rester, solde 1010, une seule sauvegarde,
+  actualisation de l’historique et des statistiques, reprise par le FAB et retour
+  à l’accueil après Changer la mise;
+- mise de 25 conservée entre les onglets, Tirer provoque 26, solde 975 et actions désactivées;
+- historique vide explicite, Blackjack naturel avec mise de 5, paiement net de 7,5,
+  solde 1007,5 et sauvegarde automatique sans action de jeu.
+
+Les 11 tests du groupe initial en portrait passent : trois parcours de jeu,
+cinq parcours NavigationInstrumentedTest et trois SharedObjectsInstrumentedTest,
+ces derniers couvrant aussi la vraie rotation. Après les ajustements de disposition,
+les trois tests de jeu passent de nouveau dans la version finale en portrait anglais
+(Time: 103.239, OK 3 tests).
+
+En paysage français, les cinq tests de navigation et les deux scénarios Blackjack/
+dépassement passent. Le scénario victoire/statistiques a d’abord échoué car son
+assertion cherchait un compteur hors du viewport. Après ajout du défilement explicite,
+sa relance ciblée réussit dans la version finale (Time: 63,012, OK 1 test).
+Tous les huit cas distincts ont ainsi été validés en paysage; aucun échec ne reste
+sans correction. Les tests font défiler les boutons et titres avant de les utiliser.
+
+Commande des groupes, en adaptant classe et orientation :
+
+```powershell
+adb -s emulator-5556 shell am instrument -w -r -e class com.example.blackjack.GameplayUiInstrumentedTest,com.example.blackjack.NavigationInstrumentedTest -e orientation landscape com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Les essais ont révélé puis permis de corriger le chevauchement du FAB et le
+défilement horizontal imbriqué des jetons. Une erreur System UI du démarrage de
+l’émulateur a été fermée avant le contrôle visuel final. Les captures finales montrent
+la table et la mise en portrait anglais, ainsi que le résultat en paysage français;
+les contrôles restent accessibles en faisant défiler. Les textes et nombres sont
+localisés. Les captures sont conservées hors du dépôt, dans le dossier de visualisations.
+
+PBI concernés : intégration des mises/parties/règlement (PB-05 à PB-07), navigation
+existante PB-02, historique PB-12, écran de statistiques PB-14 et tests PB-15.
+La Sprint Review peut démontrer Mise → Partie → sauvegarde → Historique → Statistiques,
+avec reprise après changement d’onglet. Aucun PBI n’est marqué Terminé dans Excel :
+la validation visuelle par le propriétaire et les critères complets restent nécessaires.
+Aucun commit ni push effectué pour ce bloc.
+
+## Choix du nombre de paquets — 9 octobre 2026
+
+Option A approuvée : de 1 à 8 paquets, avec 1 par défaut. BetScreen affiche le nombre
+et les boutons −1/+1, désactivés aux limites. Les ressources sont traduites en anglais.
+Le réglage utilise le même verrou que la mise : aucun changement pendant la partie,
+une sauvegarde en cours ou une sauvegarde échouée à réessayer.
+
+Trajet : bouton → callback onSelectDeckCount du NavHost → GameViewModel.selectDeckCount
+→ copie de GameUiState.selectedDeckCount → nouvel affichage. Au clic Distribuer,
+startGame transmet ce nombre à createGame(count), qui construit BlackjackGame(Shoe(count)).
+La fonction de création reçoit maintenant un Int : les tests peuvent toujours fournir
+un jeu déterministe, ou vérifier le nombre transmis avec un vrai Shoe.
+
+Le premier sabot préparé est remplacé si le nombre choisi diffère de 1. Les parties
+suivantes reçoivent toujours un sabot neuf. Le nombre choisi reste conservé entre les
+parties et lors d’une rotation grâce au ViewModel partagé. Il n’est pas persisté après
+arrêt du processus, ni ajouté à l’historique : aucun changement de schéma Room dans ce bloc.
+La conservation du solde est ajoutée le 12 octobre 2026 (voir ci-dessous). L’exécution du Split reste en attente.
+
+## Conservation indépendante du solde — 12 octobre 2026
+
+Choix approuvés : table Room indépendante de l'historique, solde initial de
+1000 jetons lors du passage de la version 1 à la version 2. Les anciennes
+parties, mains et cartes sont conservées; leurs variations ne sont pas
+recalculées pour initialiser ce solde.
+
+`PlayerBalanceEntity` représente l'unique ligne `player_balance`, identifiée
+par 1. `BlackjackDatabase.MIGRATION_1_2` crée cette table sur une installation
+existante; `BlackjackApplication` enregistre cette migration. Une installation
+neuve crée sa ligne lors de la première lecture. L'insertion IGNORE conserve
+un solde déjà enregistré, y compris zéro et les demi-jetons.
+
+Au démarrage : `GameViewModel` → `BlackjackRepository.loadBalance()` →
+`BlackjackDao.getOrCreateBalance()` → Room. `GameUiState.isLoadingBalance`
+interdit de commencer ou de modifier une mise pendant la lecture. `BetScreen`
+affiche l'attente; si la lecture échoue, il affiche une erreur et un bouton
+pour réessayer, sans jouer avec un solde de remplacement.
+
+À la fin : le modèle calcule la variation nette; le ViewModel la présente,
+puis le repository demande au DAO d'enregistrer la partie, ses mains, ses
+cartes et la variation du solde dans la même transaction. Une erreur annule
+toutes ces écritures. Réessayer ne règle pas une seconde fois le solde en
+mémoire. Après fermeture, seul le dernier solde sauvegardé est restauré :
+la partie en cours, la mise choisie et le nombre de paquets ne sont pas
+restaurés. Aucune suppression de l'historique n'est ajoutée à l'interface.
+
+Les mentions précédentes d'un solde uniquement en mémoire décrivent les
+étapes antérieures. Cette évolution concerne les jetons et leur persistance;
+elle ne déclare aucun PBI terminé et ne modifie pas le backlog Excel.
+
+Vérification de ce bloc : compilation des APK réussie et 79 tests unitaires
+réussis. Sur Pixel 8 en portrait, les 82 tests Android passent, dont les trois
+tests de `PlayerBalancePersistenceTest` et les 19 tests de `GameViewModelTest`.
+Les bases des tests du solde sont isolées de `blackjack.db`. Sont vérifiés :
+migration 1 vers 2 avec conservation des parties, mains et cartes; départ à
+1000 une seule fois; conservation des demi-jetons après réouverture; solde
+indépendant de l'historique; annulation du paiement et de la partie en cas
+d'erreur; reprise sans paiement double; restauration par un nouveau ViewModel;
+erreur de lecture bloquant le jeu et nouvelle tentative réussie.
+
+En paysage sur Pixel 8, le test
+`GameplayUiInstrumentedTest#standSavesOnceAndUpdatesHistoryAndSqlStatistics`
+passe également : sélection de mise, partie, paiement unique, historique et
+statistiques. Les premiers lancements de l'instrumentation ont été interrompus
+avec `Process crashed`, sans diagnostic exploitable; les relances ciblée,
+complète et paysage ont réussi.
+
+Commandes : `gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+:app:assembleDebugAndroidTest`, puis `adb -s emulator-5554 shell am instrument
+-w -r -e orientation portrait
+com.example.blackjack.test/androidx.test.runner.AndroidJUnitRunner`.
+
+Vérification : compilation application/tests réussie et 79 tests unitaires réussis.
+Sur Pixel 8 : 17 tests GameViewModelTest, quatre GameplayUiInstrumentedTest et une
+rotation SharedObjectsInstrumentedTest passent (22 tests, Time: 36.293). Le sélecteur
+est aussi testé en paysage (1 test ciblé, Time: 7.97). Aucun échec. La capture portrait
+a été inspectée : nombre, boutons, mise et distribution sont lisibles; le contenu défile
+sans recouvrir le FAB. Les tests emploient des bases Room en mémoire et ne suppriment
+pas l’historique de l’application. Les émulateurs déjà ouverts sont laissés ouverts.
+
+La préparation des parties et les tests avancent : sélection du nombre de paquets,
+verrouillage pendant une partie, conservation lors de la rotation, sabot neuf au nombre
+choisi. Ces éléments peuvent être démontrés en Sprint Review. Aucun statut du backlog
+Excel changé et aucun commit/push effectué.

@@ -6,9 +6,13 @@ import com.example.blackjack.database.entity.GameEntity
 import com.example.blackjack.database.entity.HandEntity
 import com.example.blackjack.model.BlackjackGame
 import com.example.blackjack.model.GamePhase
+import com.example.blackjack.model.GameStatistics
 import kotlinx.coroutines.flow.Flow
 
 class BlackjackRepository(private val dao: BlackjackDao) {
+    // Lecture au démarrage, sans exposer le DAO au ViewModel.
+    suspend fun loadBalance(): Double = dao.getOrCreateBalance()
+
     suspend fun saveFinishedGame(
         game: BlackjackGame,
         bet: Int,
@@ -54,6 +58,9 @@ class BlackjackRepository(private val dao: BlackjackDao) {
     }
 
     fun observeHistory(): Flow<List<GameEntity>> = dao.observeHistory()
+
+    // Transmet les calculs SQL au ViewModel, sans recompter l'historique en Kotlin.
+    fun observeStatistics(): Flow<GameStatistics> = dao.observeStatistics()
 
     suspend fun getHands(gameId: Long): List<HandEntity> = dao.getHands(gameId)
 

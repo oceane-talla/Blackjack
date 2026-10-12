@@ -24,8 +24,7 @@ fun ScreenContent(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            // Le contenu peut défiler au-dessus du FAB, même en paysage.
-            .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 104.dp),
+            .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         Text(text = title, style = MaterialTheme.typography.headlineMedium)
