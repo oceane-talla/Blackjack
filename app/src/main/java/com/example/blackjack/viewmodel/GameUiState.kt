@@ -3,6 +3,7 @@ package com.example.blackjack.viewmodel
 import com.example.blackjack.model.Card
 import com.example.blackjack.model.GamePhase
 import com.example.blackjack.model.GameResult
+import com.example.blackjack.model.PlayerHandState
 
 enum class GameError {
     // Impossible de lire le solde : le jeu attend une nouvelle tentative.
@@ -11,7 +12,7 @@ enum class GameError {
     BET_NOT_ALLOWED,
     // La partie n'a pas pu continuer, par exemple si le sabot est vide.
     ROUND_INTERRUPTED,
-    // La partie est terminée, mais son enregistrement a échoué.
+    // Une sauvegarde intermédiaire ou finale a échoué; les actions attendent une reprise.
     SAVE_FAILED
 }
 
@@ -29,11 +30,15 @@ data class GameUiState(
     val roundBet: Int? = null,
     // Cartes du joueur à afficher.
     val playerCards: List<Card> = emptyList(),
+    // Toutes les mains, dans leur ordre de jeu; nécessaire pour préparer l'affichage du Split.
+    val playerHands: List<PlayerHandState> = emptyList(),
+    // Index Kotlin (0 ou 1) de la main qui reçoit les prochaines actions.
+    val activeHandIndex: Int = 0,
     // Une entrée null représente le dos de la carte cachée du croupier.
     val dealerCards: List<Card?> = emptyList(),
     // Total des points de la main du joueur.
     val playerTotal: Int = 0,
-    // Total du croupier ; null tant que sa deuxième carte est cachée.
+    // Total du croupier ; null tant que sa première carte est cachée.
     val dealerTotal: Int? = 0,
     // Étape actuelle : attente, tour du joueur, tour du croupier, fin ou interruption.
     val phase: GamePhase = GamePhase.READY,
@@ -49,6 +54,8 @@ data class GameUiState(
     val canHit: Boolean = false,
     // Permet d'activer le bouton Rester.
     val canStand: Boolean = false,
+    // Le modèle autorise le Split si la paire, le solde et le tour sont valides.
+    val canSplit: Boolean = false,
     // Indique que l'enregistrement de la partie est en cours.
     val isSaving: Boolean = false,
     // Identifiant retourné par Room ; null tant que la partie n'est pas sauvegardée.

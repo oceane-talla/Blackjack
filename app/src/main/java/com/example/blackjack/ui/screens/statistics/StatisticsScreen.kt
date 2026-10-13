@@ -42,6 +42,29 @@ fun StatisticsScreen(state: StatisticsUiState, modifier: Modifier = Modifier) {
                 CardStatistic(R.string.suit_clubs, stats.clubsCards, stats.clubsPercentage)
                 CardStatistic(R.string.suit_spades, stats.spadesCards, stats.spadesPercentage)
             }
+            CasinoPanel {
+                Text(stringResource(R.string.ranks_heading), style = MaterialTheme.typography.titleLarge)
+                state.rankStatistics.forEach { rank ->
+                    val label = when (rank.rank) {
+                        "ACE" -> stringResource(R.string.rank_ace)
+                        "TWO" -> "2"
+                        "THREE" -> "3"
+                        "FOUR" -> "4"
+                        "FIVE" -> "5"
+                        "SIX" -> "6"
+                        "SEVEN" -> "7"
+                        "EIGHT" -> "8"
+                        "NINE" -> "9"
+                        "TEN" -> "10"
+                        "JACK" -> stringResource(R.string.rank_jack)
+                        "QUEEN" -> stringResource(R.string.rank_queen)
+                        "KING" -> stringResource(R.string.rank_king)
+                        else -> rank.rank
+                    }
+                    ValueRow(label, stringResource(R.string.card_statistic,
+                        rank.cardCount.toString(), rank.percentage?.let(::chipText) ?: "—"))
+                }
+            }
         }
     }
 }

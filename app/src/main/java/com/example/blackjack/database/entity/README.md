@@ -1,5 +1,23 @@
 # Package database.entity
 
+Version 4 : `GameEntity` conserve aussi `phase`, `activeHandIndex` (index 0 ou 1)
+et `deckCount`. Ces champs sont `null` dans les anciennes sauvegardes.
+`ShoeCardEntity` décrit une carte restante du sabot dans `shoe_cards` : sa clé
+`(gameId, position)` conserve l'ordre tout en autorisant les exemplaires identiques
+de plusieurs paquets. Les positions commencent à 0; `Shoe` tire la dernière carte.
+La clé étrangère `gameId` relie le sabot à la partie sauvegardée. Cette table ne
+contient pas les cartes déjà distribuées et n'alimente pas leurs statistiques.
+Le DAO sait maintenant sauvegarder et relire cet état. Le repository et le
+ViewModel ne l'utilisent pas encore pendant le jeu.
+
+Mise à jour du 12 octobre 2026 : GameEntity.status distingue IN_PROGRESS
+et FINISHED (valeur par défaut des anciennes sauvegardes finales). result
+et chipChange sont maintenant nullables dans GameEntity et HandEntity.
+null indique un résultat ou paiement non déterminé; 0.0 indique une variation
+déterminée et nulle. La migration 2 vers 3 conserve les lignes et leurs liens.
+Ces champs préparent la reprise; les sauvegardes pendant le jeu et la
+restauration du modèle ne sont pas encore branchées dans ce bloc.
+
 Depuis le 12 octobre 2026, `PlayerBalanceEntity` représente le solde du
 joueur dans `player_balance`. Sa seule ligne utilise l'identifiant 1 et un
 `Double` pour les demi-jetons. Ce solde est indépendant des tables d'historique.

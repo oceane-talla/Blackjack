@@ -1,12 +1,21 @@
 package com.example.blackjack.model
 
-class Shoe(numberOfDecks: Int) {
+class Shoe private constructor() {
     private val availableCards = mutableListOf<Card>()
 
     val remainingCards: Int
         get() = availableCards.size
 
-    init {
+    // Une copie : le repository peut sauvegarder l'ordre sans modifier le sabot.
+    val remainingCardList: List<Card>
+        get() = availableCards.toList()
+
+    constructor(savedCards: List<Card>) : this() {
+        // Aucun paquet neuf ni mélange : on reprend exactement le sabot sauvegardé.
+        availableCards.addAll(savedCards)
+    }
+
+    constructor(numberOfDecks: Int) : this() {
         require(numberOfDecks > 0) { "The number of decks must be greater than zero." }
 
         repeat(numberOfDecks) {

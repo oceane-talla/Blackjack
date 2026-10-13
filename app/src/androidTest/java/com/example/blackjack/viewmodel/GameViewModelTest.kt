@@ -11,6 +11,7 @@ import com.example.blackjack.database.dao.BlackjackDao
 import com.example.blackjack.database.entity.DrawnCardEntity
 import com.example.blackjack.database.entity.GameEntity
 import com.example.blackjack.database.entity.HandEntity
+import com.example.blackjack.database.entity.ShoeCardEntity
 import com.example.blackjack.model.BlackjackGame
 import com.example.blackjack.model.Card
 import com.example.blackjack.model.GamePhase
@@ -77,6 +78,111 @@ class GameViewModelTest {
     }
 
     @Test
+    fun splitPublishesBothHandsSavesProgressAndSettlesBothHands() = runBlocking {
+        createViewModel { gameWith(
+            Rank.TEN, Rank.SIX, Rank.TEN, Rank.EIGHT, Rank.TWO, Rank.THREE, Rank.TEN
+        ) }
+        onMain {
+            assertTrue(viewModel.selectBet(10))
+            assertTrue(viewModel.startGame())
+        }
+        awaitIdle()
+
+        assertTrue(viewModel.uiState.value.canSplit)
+        onMain { assertTrue(viewModel.split()) }
+        val splitState = viewModel.uiState.value
+        assertEquals(2, splitState.playerHands.size)
+        assertEquals(listOf(12, 13), splitState.playerHands.map { it.total })
+        assertEquals(0, splitState.activeHandIndex)
+        assertFalse(splitState.canSplit)
+        awaitIdle()
+
+        val savedProgress = checkNotNull(repository.loadGameProgress())
+        assertEquals(20, savedProgress.game.totalBet)
+        assertEquals(listOf(12, 13), savedProgress.hands.map { it.total })
+        assertEquals(0, savedProgress.game.activeHandIndex)
+
+        onMain { assertTrue(viewModel.stand()) }
+        awaitIdle()
+        assertEquals(1, viewModel.uiState.value.activeHandIndex)
+        onMain { assertTrue(viewModel.stand()) }
+        val finished = awaitSaved()
+        assertEquals(GameResult.WIN, finished.result)
+        assertEquals(20.0, finished.chipChange!!, 0.0)
+        assertEquals(1_020.0, finished.chips, 0.0)
+        assertEquals(1_020.0, repository.loadBalance(), 0.0)
+        assertEquals(listOf(GameResult.WIN.name, GameResult.WIN.name),
+            repository.getHands(checkNotNull(finished.savedGameId)).map { it.result })
+    }
+
+    @Test
+    fun recreationRestoresTheRoundAndContinuesWithTheSavedShoe() = runBlocking {
+        val cards = listOf(Rank.TEN, Rank.TEN, Rank.SIX, Rank.SIX, Rank.THREE, Rank.TWO)
+            .map { Card(it, Suit.HEARTS) }.reversed()
+        onMain {
+            viewModel = GameViewModel(repository, createShoe = { Shoe(cards) },
+                createGame = { BlackjackGame(it) })
+            store.put("game", viewModel)
+        }
+        withTimeout(10_000) { viewModel.uiState.first { !it.isLoadingBalance } }
+        onMain {
+            viewModel.selectBet(10)
+            viewModel.startGame()
+            assertFalse(viewModel.hit()) // Sauvegarde initiale en cours.
+        }
+        awaitIdle()
+        val id = checkNotNull(repository.loadGameProgress()).game.id
+        createViewModel { gameWith() }
+        assertEquals(10, viewModel.uiState.value.roundBet)
+        assertEquals(16, viewModel.uiState.value.playerTotal)
+        assertNull(viewModel.uiState.value.dealerCards.first())
+        assertTrue(viewModel.uiState.value.canHit)
+        onMain { assertTrue(viewModel.hit()) }
+        awaitIdle()
+        assertEquals(19, viewModel.uiState.value.playerTotal)
+        assertEquals(id, checkNotNull(repository.loadGameProgress()).game.id)
+        onMain { assertTrue(viewModel.stand()) }
+        val finished = awaitSaved()
+        assertEquals(id, finished.savedGameId)
+        assertEquals(1010.0, finished.chips, 0.0)
+        assertEquals(1010.0, repository.loadBalance(), 0.0)
+        createViewModel { gameWith() }
+        assertEquals(GamePhase.READY, viewModel.uiState.value.phase)
+        assertEquals(1010.0, viewModel.uiState.value.chips, 0.0)
+    }
+
+    @Test
+    fun failedIntermediateSaveBlocksActionsUntilRetryWithoutPaying() = runBlocking {
+        val realDao = database.blackjackDao()
+        var attempts = 0
+        val failingDao = object : BlackjackDao by realDao {
+            override suspend fun saveGameProgress(game: GameEntity, hands: List<HandEntity>,
+                drawnCards: List<DrawnCardEntity>, shoeCards: List<ShoeCardEntity>): Long {
+                attempts++
+                if (attempts == 1) throw SQLiteException("Simulated progress failure")
+                return realDao.saveGameProgress(game, hands, drawnCards, shoeCards)
+            }
+        }
+        createViewModel(BlackjackRepository(failingDao)) {
+            gameWith(Rank.TEN, Rank.TEN, Rank.NINE, Rank.EIGHT)
+        }
+        onMain { viewModel.startGame() }
+        val failed = withTimeout(10_000) { viewModel.uiState.first { it.canRetrySave } }
+        assertEquals(1000.0, failed.chips, 0.0)
+        onMain {
+            assertFalse(viewModel.hit())
+            assertFalse(viewModel.stand())
+            assertFalse(viewModel.startGame())
+            viewModel.retrySave()
+        }
+        awaitIdle()
+        assertEquals(2, attempts)
+        assertTrue(viewModel.uiState.value.canHit)
+        assertEquals(4, checkNotNull(repository.loadGameProgress()).drawnCards.size)
+        assertEquals(1000.0, repository.loadBalance(), 0.0)
+    }
+
+    @Test
     fun invalidBetDoesNotReplaceThePreviousValidSelection() {
         createViewModel { gameWith() }
         onMain {
@@ -94,7 +200,7 @@ class GameViewModelTest {
     }
 
     @Test
-    fun startingHidesTheSecondDealerCardAndItsTotalWithoutTakingTheBet() = runBlocking {
+    fun startingHidesTheFirstDealerCardAndItsTotalWithoutTakingTheBet() = runBlocking {
         var gameCount = 0
         createViewModel {
             gameCount++
@@ -106,13 +212,14 @@ class GameViewModelTest {
             assertFalse(viewModel.startGame())
             assertFalse(viewModel.selectBet(20))
         }
+        awaitIdle()
         val state = viewModel.uiState.value
         assertEquals(1, gameCount)
         assertEquals(GamePhase.PLAYER_TURN, state.phase)
         assertEquals(19, state.playerTotal)
         assertEquals(2, state.dealerCards.size)
-        assertEquals(Rank.FIVE, state.dealerCards.first()?.rank)
-        assertNull(state.dealerCards[1])
+        assertEquals(Rank.SIX, state.dealerCards[1]?.rank)
+        assertNull(state.dealerCards[0])
         assertNull(state.dealerTotal)
         assertEquals(1_000.0, state.chips, 0.0)
         assertEquals(10, state.selectedBet)
@@ -126,6 +233,7 @@ class GameViewModelTest {
     fun hitPublishesANewStateWithoutChangingThePreviouslyReadState() = runBlocking {
         createViewModel { gameWith(Rank.FIVE, Rank.TEN, Rank.SIX, Rank.EIGHT, Rank.SEVEN) }
         onMain { viewModel.startGame() }
+        awaitIdle()
         withTimeout(10_000) {
             val firstEmission = CompletableDeferred<Unit>()
             val emissions = async {
@@ -138,7 +246,7 @@ class GameViewModelTest {
             assertEquals(2, states.first().playerCards.size)
             assertEquals(18, states.last().playerTotal)
             assertEquals(3, states.last().playerCards.size)
-            assertNull(states.last().dealerCards[1])
+            assertNull(states.last().dealerCards[0])
             assertNull(states.last().dealerTotal)
             assertEquals(1_000.0, states.last().chips, 0.0)
         }
@@ -150,6 +258,9 @@ class GameViewModelTest {
         onMain {
             viewModel.selectBet(10)
             viewModel.startGame()
+        }
+        awaitIdle()
+        onMain {
             assertTrue(viewModel.stand())
             assertTrue(viewModel.uiState.value.isSaving)
             assertFalse(viewModel.selectDeckCount(8))
@@ -181,7 +292,7 @@ class GameViewModelTest {
     }
 
     @Test
-    fun naturalBlackjackFinishesImmediatelyAndPaysHalfChips() = runBlocking {
+    fun naturalBlackjackFinishesImmediatelyAndPaysTwoBets() = runBlocking {
         createViewModel { gameWith(Rank.ACE, Rank.TEN, Rank.KING, Rank.NINE) }
         onMain {
             viewModel.selectBet(5)
@@ -190,10 +301,10 @@ class GameViewModelTest {
         val state = awaitSaved()
         assertTrue(state.playerHasBlackjack)
         assertEquals(GameResult.WIN, state.result)
-        assertEquals(7.5, state.chipChange!!, 0.0)
-        assertEquals(1_007.5, state.chips, 0.0)
+        assertEquals(10.0, state.chipChange!!, 0.0)
+        assertEquals(1_010.0, state.chips, 0.0)
         assertTrue(state.dealerCards.all { it != null })
-        assertEquals(7.5, repository.observeHistory().first().single().chipChange, 0.0)
+        assertEquals(10.0, repository.observeHistory().first().single().chipChange!!, 0.0)
     }
 
     @Test
@@ -228,6 +339,9 @@ class GameViewModelTest {
         onMain {
             viewModel.selectBet(10)
             viewModel.startGame()
+        }
+        awaitIdle()
+        onMain {
             viewModel.hit()
         }
         val state = awaitSaved()
@@ -244,6 +358,9 @@ class GameViewModelTest {
         onMain {
             viewModel.selectBet(10)
             viewModel.startGame()
+        }
+        awaitIdle()
+        onMain {
             viewModel.hit()
         }
         val state = awaitSaved()
@@ -256,7 +373,7 @@ class GameViewModelTest {
     }
 
     @Test
-    fun interruptedRoundsHaveNoPaymentAndAreNotSaved() = runBlocking {
+    fun interruptedRoundsKeepTheirCardsWithoutPaymentAndAllowANewRound() = runBlocking {
         val games = listOf(
             gameWith(Rank.TEN),
             gameWith(Rank.TEN, Rank.TEN, Rank.EIGHT, Rank.NINE),
@@ -267,9 +384,13 @@ class GameViewModelTest {
             onMain {
                 viewModel.selectBet(10)
                 viewModel.startGame()
+            }
+            awaitIdle()
+            onMain {
                 if (index == 1) viewModel.hit()
                 if (index == 2) viewModel.stand()
             }
+            awaitIdle()
             val state = viewModel.uiState.value
             assertEquals(GamePhase.INTERRUPTED, state.phase)
             assertEquals(GameError.ROUND_INTERRUPTED, state.error)
@@ -279,6 +400,7 @@ class GameViewModelTest {
             assertNull(state.savedGameId)
             assertTrue(state.canStartGame)
             assertTrue(repository.observeHistory().first().isEmpty())
+            assertNull(repository.loadGameProgress())
         }
     }
 
@@ -294,8 +416,8 @@ class GameViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(20, state.selectedBet)
         assertEquals(10, state.roundBet)
-        assertEquals(1_015.0, state.chips, 0.0)
-        assertEquals(15.0, state.chipChange!!, 0.0)
+        assertEquals(1_020.0, state.chips, 0.0)
+        assertEquals(20.0, state.chipChange!!, 0.0)
         assertEquals(10, repository.getHands(saved.savedGameId!!).single().bet)
     }
 
@@ -316,7 +438,7 @@ class GameViewModelTest {
         val state = viewModel.uiState.value
         assertEquals(2, gameCount)
         assertEquals(5, state.selectedBet)
-        assertEquals(1_007.5, state.chips, 0.0)
+        assertEquals(1_010.0, state.chips, 0.0)
         assertEquals(GamePhase.PLAYER_TURN, state.phase)
         assertEquals(19, state.playerTotal)
         assertNull(state.chipChange)
@@ -378,7 +500,7 @@ class GameViewModelTest {
         val failed = withTimeout(10_000) {
             viewModel.uiState.first { it.error == GameError.SAVE_FAILED }
         }
-        assertEquals(1_015.0, failed.chips, 0.0)
+        assertEquals(1_020.0, failed.chips, 0.0)
         assertTrue(failed.canRetrySave)
         onMain { assertFalse(viewModel.selectDeckCount(8)) }
         assertNull(failed.savedGameId)
@@ -390,7 +512,7 @@ class GameViewModelTest {
         }
         val saved = awaitSaved()
         assertEquals(2, attempts)
-        assertEquals(1_015.0, saved.chips, 0.0)
+        assertEquals(1_020.0, saved.chips, 0.0)
         assertNull(saved.error)
         assertFalse(saved.canRetrySave)
         assertNotNull(saved.savedGameId)
@@ -416,11 +538,10 @@ class GameViewModelTest {
     }
 
     @Test
-    fun selectedDeckCountCreatesAFreshShoeForTheFirstAndFollowingRounds() = runBlocking {
+    fun selectedDeckCountKeepsTheSameShoeForFollowingRounds() = runBlocking {
         val shoes = mutableListOf<Shoe>()
         onMain {
-            viewModel = GameViewModel(repository) { count ->
-                val shoe = Shoe(count)
+            viewModel = GameViewModel(repository) { shoe ->
                 shoes.add(shoe)
                 BlackjackGame(shoe)
             }
@@ -431,14 +552,18 @@ class GameViewModelTest {
             assertTrue(viewModel.selectDeckCount(8))
             assertTrue(viewModel.startGame())
             assertEquals(412, shoes.last().remainingCards)
+        }
+        awaitIdle()
+        onMain {
             if (viewModel.uiState.value.canStand) viewModel.stand()
         }
         awaitSaved()
+        val remainingAfterFirstRound = shoes.last().remainingCards
         onMain {
             assertTrue(viewModel.startGame())
             assertEquals(3, shoes.size) // Préparation initiale, première partie, seconde partie.
-            assertEquals(412, shoes.last().remainingCards)
-            assertTrue(shoes[1] !== shoes[2])
+            assertEquals(remainingAfterFirstRound - 4, shoes.last().remainingCards)
+            assertTrue(shoes[1] === shoes[2])
             assertEquals(8, viewModel.uiState.value.selectedDeckCount)
         }
     }
@@ -474,6 +599,81 @@ class GameViewModelTest {
         assertEquals(1000.0, viewModel.uiState.value.chips, 0.0)
     }
 
+    @Test
+    fun exactlyFourRemainingCardsAreReusedThenAnEmptyShoeIsRenewed() = runBlocking {
+        val shoes = prepareShortShoes(8)
+        onMain { assertTrue(viewModel.startGame()) }
+        awaitSaved()
+        assertEquals(4, shoes.single().remainingCards)
+        onMain { assertTrue(viewModel.startGame()) }
+        awaitSaved()
+        assertEquals(1, shoes.size)
+        assertEquals(0, shoes.single().remainingCards)
+        onMain { assertTrue(viewModel.startGame()) }
+        awaitSaved()
+        assertEquals(2, shoes.size)
+        assertEquals(4, shoes.last().remainingCards)
+        assertEquals(3, repository.observeHistory().first().size)
+    }
+
+    @Test
+    fun oneTwoOrThreeRemainingCardsTriggerRenewalBeforeTheNextDistribution() = runBlocking {
+        for (remaining in 1..3) {
+            val shoes = prepareShortShoes(remaining + 4)
+            onMain { assertTrue(viewModel.startGame()) }
+            awaitSaved()
+            assertEquals(remaining, shoes.single().remainingCards)
+            onMain { assertTrue(viewModel.startGame()) }
+            awaitSaved()
+            assertEquals(2, shoes.size)
+            assertEquals(remaining, shoes.last().remainingCards)
+        }
+    }
+
+    @Test
+    fun changingDeckCountReplacesAShoeThatStillHasEnoughCards() = runBlocking {
+        val shoes = prepareShortShoes(12)
+        onMain { assertTrue(viewModel.startGame()) }
+        awaitSaved()
+        assertEquals(8, shoes.single().remainingCards)
+        onMain {
+            assertTrue(viewModel.selectDeckCount(2))
+            assertTrue(viewModel.startGame())
+        }
+        awaitSaved()
+        assertEquals(2, shoes.size)
+        assertEquals(8, shoes.first().remainingCards)
+        assertEquals(100, shoes.last().remainingCards)
+    }
+
+    // Consomme réellement le sabot, mais retourne des rangs prévisibles pour finir
+    // chaque partie en quatre cartes, indépendamment du mélange aléatoire de Shoe.
+    private fun prepareShortShoes(initialCards: Int): MutableList<Shoe> {
+        val shoes = mutableListOf<Shoe>()
+        onMain {
+            store.clear()
+            viewModel = GameViewModel(
+                repository,
+                createShoe = { count ->
+                    Shoe(count).also { shoe ->
+                        if (count == 1) repeat(shoe.remainingCards - initialCards) { shoe.drawCard() }
+                        shoes.add(shoe)
+                    }
+                },
+                createGame = { shoe ->
+                    val ranks = ArrayDeque(listOf(Rank.ACE, Rank.TEN, Rank.KING, Rank.NINE))
+                    BlackjackGame {
+                        if (shoe.drawCard() == null) null
+                        else Card(ranks.removeFirst(), Suit.HEARTS)
+                    }
+                }
+            )
+            store.put("game", viewModel)
+        }
+        runBlocking { withTimeout(10_000) { viewModel.uiState.first { !it.isLoadingBalance } } }
+        return shoes
+    }
+
     private fun createViewModel(
         dataRepository: BlackjackRepository = repository,
         createGame: () -> BlackjackGame
@@ -490,6 +690,10 @@ class GameViewModelTest {
 
     private suspend fun awaitSaved(): GameUiState = withTimeout(10_000) {
         viewModel.uiState.first { !it.isSaving && it.savedGameId != null }
+    }
+
+    private suspend fun awaitIdle() = withTimeout(10_000) {
+        viewModel.uiState.first { !it.isSaving }
     }
 
     private fun onMain(action: () -> Unit) = instrumentation.runOnMainSync(action)

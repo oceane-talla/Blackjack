@@ -4,33 +4,60 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.blackjack.repository.BlackjackRepository
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
-// Observe les statistiques via le repository ; les calculs restent dans les requêtes SQL.
+// Observe les statistiques via le repository; les calculs restent dans SQL.
 class StatisticsViewModel(private val repository: BlackjackRepository) : ViewModel() {
-    // Source modifiable privée et accès en lecture seule destiné à Compose.
-    private val _uiState = MutableStateFlow(StatisticsUiState())
-    val uiState: StateFlow<StatisticsUiState> = _uiState.asStateFlow()
-
-    // Démarre une seule observation lors de la création de cette instance.
-    init {
-        // L'observation est annulée lorsque le ViewModel est définitivement supprimé.
-        viewModelScope.launch {
-            repository.observeStatistics()
-                .catch { exception ->
-                    // Conserve les dernières valeurs reçues si la lecture échoue.
-                    // catch laisse passer l'annulation de la coroutine.
-                    Log.e("StatisticsViewModel", "Failed to observe game statistics.", exception)
-                    _uiState.value = _uiState.value.copy(isLoading = false, hasError = true)
-                }
-                .collect { statistics ->
-                    // Room transmet un nouveau résumé quand une table concernée change.
-                    _uiState.value = StatisticsUiState(statistics = statistics, isLoading = false)
-                }
-        }
+    private val summaryStates = flow {
+        var lastState = StatisticsUiState()
+        // Permet à combine de publier une erreur même si l'autre requête attend encore.
+        emit(lastState)
+        emitAll(repository.observeStatistics()
+            .map { statistics ->
+                lastState = StatisticsUiState(statistics = statistics, isLoading = false)
+                lastState
+            }
+            .catch { exception ->
+                Log.e("StatisticsViewModel", "Failed to observe game statistics.", exception)
+                emit(lastState.copy(isLoading = false, hasError = true))
+            })
     }
+
+    private val rankStates = flow {
+        var lastState = StatisticsUiState()
+        emit(lastState)
+        emitAll(repository.observeRankStatistics()
+            .map { ranks ->
+                lastState = StatisticsUiState(rankStatistics = ranks, isLoading = false)
+                lastState
+            }
+            .catch { exception ->
+                Log.e("StatisticsViewModel", "Failed to observe rank statistics.", exception)
+                emit(lastState.copy(isLoading = false, hasError = true))
+            })
+    }
+
+    // combine réunit les dernières valeurs des deux lectures dans l'état de l'écran.
+    // Une erreur d'une lecture n'arrête pas l'autre; chacune conserve ses dernières données.
+    val uiState: StateFlow<StatisticsUiState> = combine(summaryStates, rankStates) { summary, ranks ->
+        val hasError = summary.hasError || ranks.hasError
+        StatisticsUiState(
+            statistics = summary.statistics,
+            rankStatistics = ranks.rankStatistics,
+            isLoading = (summary.isLoading || ranks.isLoading) && !hasError,
+            hasError = hasError
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        // Même fonctionnement qu'Atelier3 et HistoryViewModel.
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = StatisticsUiState()
+    )
 }

@@ -3,9 +3,9 @@ package com.example.blackjack.model
 // Résultat d'une requête SQL, sans @Entity : cette classe ne crée aucune nouvelle table.
 // Les pourcentages sont exprimés de 0 à 100 ; null signifie aucune carte enregistrée.
 data class GameStatistics(
-    // Nombre de parties : une partie avec Split compte une seule fois.
+    // Parties terminées : une partie avec Split compte une seule fois.
     val totalGames: Long = 0,
-    // Nombre de mains du joueur : une partie avec Split en possède deux.
+    // Mains du joueur des parties terminées : une partie avec Split en possède deux.
     val totalHands: Long = 0,
     // Toutes les cartes distribuées et sauvegardées, joueur et croupier inclus.
     val totalCards: Long = 0,

@@ -1,5 +1,33 @@
 # Package viewmodel
 
+## Sauvegarde et reprise — 13 octobre 2026
+
+Au démarrage, `GameViewModel` lit le solde et appelle `restoreGameProgress()`.
+La partie retrouvée remplace le modèle initial avec sa mise, son identifiant
+et son sabot. La fin du chargement et les cartes sont publiées ensemble.
+Après distribution, Tirer ou Rester, `saveCurrentGame()` bloque les actions
+pendant l'écriture. Un échec permet de réessayer sans rejouer ni payer à nouveau.
+Une progression est réglée avec `finishGameProgress()` et le même identifiant.
+Un blackjack immédiat utilise encore la sauvegarde finale directe.
+
+Une interruption utilise le statut INTERRUPTED : ses cartes sont conservées,
+sans paiement, et une nouvelle partie est permise. Elle est exclue de
+l'historique des parties réglées; ses distributions comptent en statistiques.
+La colonne texte existante suffit, sans migration Room.
+
+Compilation, 108 tests Kotlin et 75 tests Android ciblés réussis sur
+Pixel_10_Pro (7,18 s), dont la recréation du ViewModel et l'échec/reprise d'une
+sauvegarde intermédiaire. La fermeture réelle du processus sur Pixel 8 reste
+à démontrer. Le sabot entre deux parties après fermeture n'est pas restauré;
+la reprise concerne une partie en cours sauvegardée avec succès.
+PB-11 et PB-15 restent en cours; aucun statut Excel, commit ou push.
+
+Le test Compose `standSavesOnceAndUpdatesHistoryAndSqlStatistics` passe aussi
+en portrait (25,275 s) et paysage (24,722 s) sur Pixel_10_Pro : actions,
+règlement, historique et statistiques. Il ne simule pas la mort du processus.
+
+## Notes des étapes précédentes
+
 Mise à jour du 12 octobre 2026 : le solde est maintenant enregistré dans
 Room indépendamment de l'historique. À sa création, `GameViewModel` appelle
 `repository.loadBalance()` et bloque les mises et le démarrage pendant cette
@@ -22,12 +50,13 @@ Fichiers présents :
 le repository. L'état contient les résumés des parties, le chargement initial
 et un indicateur d'erreur de lecture. Room transmet automatiquement une
 nouvelle liste lorsque les données changent, en conservant le tri du DAO.
-Une erreur conserve la dernière liste reçue et termine le chargement;
-l'observation échouée ne redémarre pas automatiquement. Aucun détail de partie
+Une erreur conserve la dernière liste reçue pendant l'observation et termine
+le chargement. Aucun détail de partie
 ni commande de suppression n'est ajouté. HistoryScreen reçoit maintenant cet état via le NavHost.
 
 `StatisticsViewModel.kt` et `StatisticsUiState.kt` observent maintenant
-`repository.observeStatistics()`. L'état contient le résumé `GameStatistics`,
+`repository.observeStatistics()` et `repository.observeRankStatistics()`.
+L'état contient le résumé `GameStatistics`, les statistiques des 13 rangs,
 le chargement initial et l'erreur éventuelle. Les compteurs, sommes, moyennes
 et proportions viennent de SQLite : le ViewModel ne charge pas toute la liste
 des parties pour les recalculer. Une erreur conserve les dernières valeurs;
@@ -42,10 +71,48 @@ tests unitaires réussis. Les scénarios et commandes sont documentés dans
 et la construction de l'écran. Aucun de ces PBI n'est déclaré terminé.
 
 L'état est exposé avec `StateFlow`, qui fournit une valeur actuelle et ses
-changements. Le ViewModel conserve un `MutableStateFlow` privé et expose
-`asStateFlow()` en lecture seule, comme dans `Atelier3`.
+changements. GameViewModel conserve un `MutableStateFlow` privé et expose
+`asStateFlow()` en lecture seule.
+Depuis le 12 octobre 2026, HistoryViewModel utilise `stateIn()` avec
+`SharingStarted.WhileSubscribed(5_000)`, comme CalculViewModel dans Atelier3.
+`map` transforme les listes en HistoryUiState et `catch` publie les erreurs.
+`flow` et `emitAll` gardent un dernier état propre à chaque observation pour
+conserver sa liste si une erreur survient ensuite.
+L'observation démarre au premier abonné et s'arrête cinq secondes après
+le départ du dernier. Le StateFlow conserve sa dernière valeur pendant
+l'arrêt; au retour de l'écran, Room fournit l'historique actuel. Lire
+`uiState.value` seul ne démarre pas la lecture. L'état initial indique
+le chargement. Une erreur ne déclenche pas de boucle de nouvelle tentative;
+une observation peut redémarrer après un arrêt puis un nouvel abonnement.
 Compose l'observe avec `collectAsStateWithLifecycle()`, afin
 d'adapter cette observation au cycle de vie de l'écran.
+
+StatisticsViewModel utilise maintenant le même `stateIn()` avec
+`WhileSubscribed(5_000)`. `summaryStates` prépare le résumé et `rankStates`
+prépare les rangs : map transforme les données, catch conserve les dernières
+données de la lecture et signale une erreur. Chaque lecture émet d'abord
+son état de chargement. `combine` assemble leurs dernières valeurs dans un
+seul StatisticsUiState, sans calcul statistique supplémentaire en Kotlin.
+Le chargement attend les deux réponses, sauf erreur. L'échec d'une lecture
+n'empêche pas l'autre de s'actualiser. Sans abonné, les deux lectures s'arrêtent
+après cinq secondes et reprennent à la prochaine observation par l'écran.
+
+Vérification du bloc StatisticsViewModel/stateIn : compilation réussie;
+sur Pixel 8, 9 tests StatisticsViewModel, 5 tests Factory et 2 parcours
+d'interface passent. Une ancienne attente du test Factory a été corrigée
+de 10,5 à 14 pour un Blackjack naturel à mise 7, conformément au paiement
+du modèle déjà approuvé; aucun paiement de production n'a changé dans ce bloc.
+Les tests vérifient le délai d'arrêt des deux lectures, leur reprise après
+sauvegarde pendant l'arrêt, le chargement et les erreurs indépendantes.
+PB-13, PB-14 et PB-15 concernés; combine/stateIn démontrables en Sprint Review.
+Aucun statut Excel changé, aucun commit ni push effectué dans ce bloc.
+
+Vérification du bloc stateIn : compilation application/tests réussie et
+7 tests ciblés sur Pixel 8 réussis (6 HistoryViewModelTest et le parcours
+Partie → Historique → Statistiques). Le délai d'arrêt et la reprise après
+une insertion pendant l'arrêt sont vérifiés. PB-12 et PB-15 concernés;
+l'utilisation de stateIn peut être présentée en Sprint Review. Aucun statut
+Excel changé, aucun commit ni push effectué dans ce bloc.
 
 Chemins utilisés :
 
@@ -65,14 +132,31 @@ pas la précédente; la mise ne change pas pendant une partie active.
 Le solde initial est de 1000 jetons et la mise initiale de 1.
 
 `selectDeckCount(count)` conserve un choix de 1 à 8 paquets, verrouillé comme
-la mise pendant le jeu et les sauvegardes. `startGame()` démarre avec un sabot
-neuf contenant le nombre choisi. Le constructeur public crée le modèle avec
-`Shoe(count)`. Le constructeur interne permet aux tests de fournir des
-parties déterministes, comme dans les tests du modèle.
+la mise pendant le jeu et les sauvegardes. Le ViewModel conserve son `Shoe`
+entre les parties. `startGame()` crée un nouveau sabot si le nombre de paquets
+change ou s'il reste moins de quatre cartes (choix A, 12 octobre 2026).
+Avec exactement quatre cartes, le sabot est conservé. Chaque nouvelle partie
+reçoit un nouveau `BlackjackGame` mais peut partager le sabot précédent.
+Le constructeur interne permet aux tests de préparer des sabots presque vides
+et des parties déterministes. Aucun renouvellement n'a lieu pendant un tour :
+si les quatre cartes initiales ne suffisent pas pour finir la partie, celle-ci
+peut encore être interrompue. Le sabot reste en mémoire, sans persistance
+après destruction du processus. Cette étape ne change pas la sauvegarde des
+parties abandonnées ni l'intégration du Split.
+
+Vérification du renouvellement : compilation application/tests réussie et
+101 tests unitaires réussis. Sur Pixel 8 : 22 GameViewModelTest et le test
+du sélecteur de paquets passent (23 tests, 49,561 s). Le sélecteur passe
+aussi en paysage (1 test, 38,664 s). Les tests couvrent exactement quatre
+cartes restantes, zéro à trois cartes, réutilisation du même sabot et
+changement du nombre de paquets. Les textes français et anglais ont été
+alignés; l'anglais n'a pas été vérifié visuellement dans ce bloc.
+PB-03 et PB-15 concernés; les statuts Scrum ne sont pas déclarés terminés
+et aucune Sprint Review réelle n'est inventée. Aucun commit ni push effectué.
 
 `hit()` et `stand()` transmettent les actions au modèle puis publient
 un nouvel état. Le ViewModel ne calcule pas les mains ni les résultats.
-Pendant le tour du joueur, la deuxième carte du croupier devient une
+Pendant le tour du joueur, la première carte du croupier devient une
 entrée `null` dans l'état affichable et `dealerTotal` est aussi `null`.
 Les valeurs complètes restent uniquement dans le modèle. À la fin,
 les cartes et le total du croupier sont révélés.

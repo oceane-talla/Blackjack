@@ -52,6 +52,7 @@ fun BlackjackNavHost(
             GameScreen(gameState,
                 onHit = { gameViewModel.hit() },
                 onStand = { gameViewModel.stand() },
+                onSplit = { gameViewModel.split() },
                 onRetrySave = { gameViewModel.retrySave() },
                 onNewGame = {
                     navController.clearBackStack(BlackjackDestination.BET)

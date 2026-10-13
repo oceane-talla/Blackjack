@@ -533,10 +533,10 @@ class BlackjackGameTest {
     }
 
     @Test
-    fun naturalBlackjackPaysOneAndAHalfBetsIncludingHalfChips() {
+    fun naturalBlackjackPaysTwoBetsAsRequiredByTheAssignment() {
         val game = gameWith(Rank.ACE, Rank.TEN, Rank.KING, Rank.NINE)
         game.startRound()
-        for ((bet, expected) in listOf(1 to 1.5, 5 to 7.5, 10 to 15.0, 100 to 150.0)) {
+        for ((bet, expected) in listOf(1 to 2.0, 5 to 10.0, 10 to 20.0, 100 to 200.0)) {
             assertEquals(expected, game.calculateChipChange(bet), 0.0)
         }
     }
@@ -701,6 +701,318 @@ class BlackjackGameTest {
         assertEquals(dealt, game.dealtCards)
         assertEquals(GamePhase.PLAYER_TURN, game.phase)
         assertNull(game.result)
+    }
+
+    @Test
+    fun splitSeparatesTheOriginalCardsAndDealsOneNewCardToEachHand() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN, Rank.TWO, Rank.THREE)
+        game.startRound()
+        val originalCards = game.playerCards
+        val originalDistribution = game.dealtCards
+
+        assertTrue(game.split(10, 20.0))
+
+        assertTrue(game.hasSplit)
+        assertEquals(0, game.activeHandIndex)
+        assertEquals(listOf(1, 2), game.playerHands.map { it.handNumber })
+        assertEquals(listOf(originalCards[0], game.dealtCards[4].card), game.playerHands[0].cards)
+        assertEquals(listOf(originalCards[1], game.dealtCards[5].card), game.playerHands[1].cards)
+        assertEquals(listOf(10, 11), game.playerHands.map { it.total })
+        assertEquals(listOf(1, null, 2, null, 1, 2), game.dealtCards.map { it.handNumber })
+        assertEquals((1..6).toList(), game.dealtCards.map { it.drawOrder })
+        assertEquals(originalDistribution.map { it.card }, game.dealtCards.take(4).map { it.card })
+        assertEquals(1, originalDistribution[2].handNumber)
+        assertFalse(game.canSplit(10, 1000.0))
+        assertTrue(game.canHit)
+        assertTrue(game.canStand)
+    }
+
+    @Test
+    fun identicalCardsFromDifferentDecksAreAssignedToDifferentHands() {
+        val card = Card(Rank.EIGHT, Suit.HEARTS)
+        val cards = ArrayDeque(listOf(card, Card(Rank.TEN, Suit.CLUBS), card,
+            Card(Rank.SEVEN, Suit.SPADES), Card(Rank.TWO, Suit.CLUBS), Card(Rank.THREE, Suit.CLUBS)))
+        val game = BlackjackGame { cards.removeFirstOrNull() }
+        game.startRound()
+        game.split(10, 20.0)
+        assertEquals(1, game.dealtCards[0].handNumber)
+        assertEquals(2, game.dealtCards[2].handNumber)
+        assertEquals(card, game.playerHands[0].cards.first())
+        assertEquals(card, game.playerHands[1].cards.first())
+    }
+
+    @Test
+    fun rejectedSplitDoesNotDrawCardsOrChangeTheRound() {
+        for (bet in listOf(0, 10, 101)) {
+            val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN, Rank.TWO, Rank.THREE)
+            game.startRound()
+            val cards = game.dealtCards
+            assertFalse(game.split(bet, 19.0))
+            assertFalse(game.hasSplit)
+            assertEquals(cards, game.dealtCards)
+            assertEquals(16, game.playerValue)
+            assertEquals(GamePhase.PLAYER_TURN, game.phase)
+        }
+        val differentRanks = gameWith(Rank.KING, Rank.TEN, Rank.QUEEN, Rank.SEVEN)
+        differentRanks.startRound()
+        assertFalse(differentRanks.split(10, 1000.0))
+    }
+
+    @Test
+    fun splitHandsPlaySuccessivelyAndTheDealerDrawsOnlyAfterBothStop() {
+        val game = gameWith(Rank.EIGHT, Rank.FIVE, Rank.EIGHT, Rank.SIX,
+            Rank.TWO, Rank.THREE, Rank.NINE, Rank.EIGHT, Rank.SEVEN)
+        game.startRound()
+        game.split(10, 20.0)
+        assertTrue(game.hit()) // Première main : 19.
+        assertEquals(19, game.playerValue)
+        assertEquals(11, game.dealerValue)
+        assertTrue(game.stand())
+        assertEquals(1, game.activeHandIndex)
+        assertEquals(11, game.playerValue)
+        assertEquals(2, game.dealerCards.size)
+        assertNull(game.result)
+        assertTrue(game.hit()) // Seconde main : 19.
+        assertTrue(game.stand()) // Le croupier tire maintenant son 7 : 18.
+        assertFinished(game, GameResult.WIN)
+        assertEquals(listOf(GameResult.WIN, GameResult.WIN), game.playerHands.map { it.result })
+        assertEquals(listOf(19, 19), game.playerHands.map { it.total })
+        assertEquals(3, game.dealerCards.size)
+        assertEquals(20.0, game.calculateChipChange(10), 0.0)
+        assertEquals(listOf(1, null, 2, null, 1, 2, 1, 2, null), game.dealtCards.map { it.handNumber })
+    }
+
+    @Test
+    fun bustingTheFirstHandMovesToTheSecondWithoutEndingTheRound() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN,
+            Rank.TEN, Rank.TEN, Rank.KING)
+        game.startRound()
+        game.split(10, 20.0)
+        assertTrue(game.hit())
+        assertEquals(1, game.activeHandIndex)
+        assertEquals(GameResult.LOSS, game.playerHands[0].result)
+        assertEquals(GamePhase.PLAYER_TURN, game.phase)
+        assertTrue(game.stand())
+        assertFinished(game, GameResult.MIXED)
+        assertEquals(-10.0, game.calculateHandChipChange(1, 10), 0.0)
+        assertEquals(10.0, game.calculateHandChipChange(2, 10), 0.0)
+        assertEquals(0.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun twoBustedHandsLoseBothBetsWithoutDrawingForTheDealer() {
+        val game = gameWith(Rank.EIGHT, Rank.FIVE, Rank.EIGHT, Rank.SIX,
+            Rank.TEN, Rank.NINE, Rank.KING, Rank.KING)
+        game.startRound()
+        game.split(10, 20.0)
+        game.hit()
+        game.hit()
+        assertFinished(game, GameResult.LOSS)
+        assertEquals(2, game.dealerCards.size)
+        assertEquals(-20.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun splitTwentyOneAutomaticallyMovesToTheOtherHandAndPaysAnOrdinaryWin() {
+        val game = gameWith(Rank.TEN, Rank.TEN, Rank.TEN, Rank.SEVEN, Rank.ACE, Rank.NINE)
+        game.startRound()
+        game.split(10, 20.0)
+        assertEquals(1, game.activeHandIndex)
+        assertFalse(game.playerHands[0].hasBlackjack)
+        assertFalse(game.playerHasBlackjack)
+        assertFalse(game.playerHands[1].hasBlackjack)
+        game.stand()
+        assertFinished(game, GameResult.WIN)
+        assertEquals(10.0, game.calculateHandChipChange(1, 10), 0.0)
+        assertEquals(10.0, game.calculateHandChipChange(2, 10), 0.0)
+        assertEquals(20.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun aSecondHandAtTwentyOneIsSkippedAfterTheFirstHandStops() {
+        val game = gameWith(Rank.TEN, Rank.TEN, Rank.TEN, Rank.SEVEN, Rank.NINE, Rank.ACE)
+        game.startRound()
+        game.split(5, 10.0)
+        assertEquals(0, game.activeHandIndex)
+        game.stand()
+        assertFinished(game, GameResult.WIN)
+        assertFalse(game.playerHasBlackjack)
+        assertEquals(10.0, game.calculateChipChange(5), 0.0)
+    }
+
+    @Test
+    fun twoSplitTwentyOnesWaitForTheDealerAndCanBothDraw() {
+        val game = gameWith(Rank.TEN, Rank.FIVE, Rank.TEN, Rank.SIX, Rank.ACE, Rank.ACE, Rank.TEN)
+        game.startRound()
+        assertTrue(game.split(100, 200.0))
+        assertFinished(game, GameResult.DRAW)
+        assertEquals(21, game.dealerValue)
+        assertEquals(0.0, game.calculateChipChange(100), 0.0)
+        assertEquals(7, game.dealtCards.size)
+        assertTrue(game.playerHands.none { it.hasBlackjack })
+    }
+
+    @Test
+    fun twentyOneInThreeCardsAfterSplitAdvancesWithoutTheNaturalBonus() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN,
+            Rank.SIX, Rank.NINE, Rank.SEVEN)
+        game.startRound()
+        game.split(10, 20.0)
+        game.hit()
+        assertEquals(21, game.playerHands[0].total)
+        assertFalse(game.playerHands[0].hasBlackjack)
+        assertEquals(1, game.activeHandIndex)
+        game.stand()
+        assertFinished(game, GameResult.MIXED)
+        assertEquals(10.0, game.calculateHandChipChange(1, 10), 0.0)
+        assertEquals(10.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun splitAcesReceiveOnlyOneCardEachAndFinishAutomatically() {
+        val game = gameWith(Rank.ACE, Rank.TEN, Rank.ACE, Rank.SEVEN, Rank.TWO, Rank.THREE)
+        game.startRound()
+        assertTrue(game.split(10, 20.0))
+        assertFinished(game, GameResult.LOSS)
+        assertEquals(listOf(13, 14), game.playerHands.map { it.total })
+        assertEquals(listOf(2, 2), game.playerHands.map { it.cards.size })
+        val cards = game.dealtCards
+        assertFalse(game.hit())
+        assertFalse(game.stand())
+        assertEquals(cards, game.dealtCards)
+        assertEquals(-20.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun splitAcesAtTwentyOneStillDrawAgainstDealerTwentyOne() {
+        val game = gameWith(Rank.ACE, Rank.FIVE, Rank.ACE, Rank.SIX, Rank.KING, Rank.QUEEN, Rank.TEN)
+        game.startRound()
+        assertTrue(game.split(10, 20.0))
+        assertFinished(game, GameResult.DRAW)
+        assertEquals(listOf(21, 21), game.playerHands.map { it.total })
+        assertTrue(game.playerHands.none { it.hasBlackjack })
+        assertEquals(0.0, game.calculateChipChange(10), 0.0)
+        assertFalse(game.canHit)
+    }
+
+    @Test
+    fun splitTwentyOnesCannotBePaidIfTheDealerRunsOutOfCards() {
+        val game = gameWith(Rank.TEN, Rank.FIVE, Rank.TEN, Rank.SIX, Rank.ACE, Rank.ACE)
+        game.startRound()
+        assertFalse(game.split(10, 20.0))
+        assertInterrupted(game)
+        assertThrows(IllegalStateException::class.java) { game.calculateChipChange(10) }
+    }
+
+    @Test
+    fun aSplitAceAndTenGetsOnlyAnOrdinaryPayment() {
+        val game = gameWith(Rank.ACE, Rank.TEN, Rank.ACE, Rank.EIGHT, Rank.KING, Rank.SEVEN)
+        game.startRound()
+        game.split(10, 20.0)
+        assertFinished(game, GameResult.MIXED)
+        assertEquals(listOf(GameResult.WIN, GameResult.DRAW), game.playerHands.map { it.result })
+        assertTrue(game.playerHands.none { it.hasBlackjack })
+        assertEquals(10.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun splitTwentyOneDrawsAgainstDealerTwentyOneInThreeCards() {
+        val game = gameWith(Rank.TEN, Rank.FIVE, Rank.TEN, Rank.SIX, Rank.ACE, Rank.NINE, Rank.TEN)
+        game.startRound()
+        game.split(10, 20.0)
+        game.stand()
+        assertEquals(21, game.dealerValue)
+        assertFinished(game, GameResult.MIXED)
+        assertEquals(listOf(GameResult.DRAW, GameResult.LOSS), game.playerHands.map { it.result })
+        assertEquals(-10.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun drawnAndLosingMixedHandsCanHaveANegativeNetPayment() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.EIGHT, Rank.TEN, Rank.NINE)
+        game.startRound()
+        game.split(10, 20.0)
+        game.stand()
+        game.stand()
+        assertFinished(game, GameResult.MIXED)
+        assertEquals(listOf(GameResult.DRAW, GameResult.LOSS), game.playerHands.map { it.result })
+        assertEquals(-10.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun bothDrawnHandsHaveADrawSummaryAndNoPayment() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN, Rank.NINE, Rank.NINE)
+        game.startRound()
+        game.split(10, 20.0)
+        game.stand()
+        game.stand()
+        assertFinished(game, GameResult.DRAW)
+        assertEquals(0.0, game.calculateChipChange(10), 0.0)
+    }
+
+    @Test
+    fun aNewPairCreatedBySplitCannotBeSplitAgain() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN, Rank.EIGHT, Rank.EIGHT)
+        game.startRound()
+        game.split(10, 1000.0)
+        val cards = game.dealtCards
+        assertFalse(game.canSplit(10, 1000.0))
+        assertFalse(game.split(10, 1000.0))
+        game.stand()
+        assertFalse(game.split(10, 1000.0))
+        assertEquals(cards, game.dealtCards)
+        assertEquals(2, game.playerHands.size)
+    }
+
+    @Test
+    fun runningOutDuringEitherSplitDrawInterruptsWithoutAPayment() {
+        for (extraCards in listOf(emptyList(), listOf(Rank.TWO))) {
+            val ranks = listOf(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN) + extraCards
+            val game = gameWith(*ranks.toTypedArray())
+            game.startRound()
+            assertFalse(game.split(10, 20.0))
+            assertInterrupted(game)
+            assertEquals(ranks, game.dealtCards.map { it.card.rank })
+            assertEquals(listOf(1, null, 2, null) + extraCards.map { 1 }, game.dealtCards.map { it.handNumber })
+            assertThrows(IllegalStateException::class.java) { game.calculateChipChange(10) }
+        }
+    }
+
+    @Test
+    fun emptyShoeDuringTheSplitDealerTurnDoesNotSettlePartialResults() {
+        val game = gameWith(Rank.EIGHT, Rank.FIVE, Rank.EIGHT, Rank.SIX, Rank.TWO, Rank.THREE)
+        game.startRound()
+        game.split(10, 20.0)
+        game.stand()
+        assertFalse(game.stand())
+        assertInterrupted(game)
+        assertThrows(IllegalStateException::class.java) { game.calculateHandChipChange(1, 10) }
+    }
+
+    @Test
+    fun startingANewRoundClearsBothSplitHandsAndTheirResults() {
+        val game = gameWith(Rank.EIGHT, Rank.TEN, Rank.EIGHT, Rank.SEVEN, Rank.NINE, Rank.NINE,
+            Rank.FIVE, Rank.TEN, Rank.SIX, Rank.EIGHT)
+        game.startRound()
+        game.split(10, 20.0)
+        game.stand()
+        game.stand()
+        assertTrue(game.startRound())
+        assertFalse(game.hasSplit)
+        assertEquals(0, game.activeHandIndex)
+        assertEquals(1, game.playerHands.size)
+        assertNull(game.playerHands.single().result)
+        assertEquals(4, game.dealtCards.size)
+        assertEquals(listOf(1, null, 1, null), game.dealtCards.map { it.handNumber })
+    }
+
+    @Test
+    fun perHandPaymentRejectsUnknownHandsAndInvalidBets() {
+        val game = gameWith(Rank.ACE, Rank.TEN, Rank.KING, Rank.NINE)
+        game.startRound()
+        assertThrows(IllegalArgumentException::class.java) { game.calculateHandChipChange(0, 10) }
+        assertThrows(IllegalArgumentException::class.java) { game.calculateHandChipChange(2, 10) }
+        assertThrows(IllegalArgumentException::class.java) { game.calculateHandChipChange(1, 0) }
     }
 
     private fun gameWith(vararg ranks: Rank): BlackjackGame {

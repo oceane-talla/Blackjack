@@ -20,8 +20,9 @@ data class HandEntity(
     val handNumber: Int,
     val bet: Int,
     val total: Int,
-    // Nom du GameResult du modèle : WIN, LOSS ou DRAW.
-    val result: String,
+    // WIN, LOSS ou DRAW; null tant que la main n'est pas réglée.
+    val result: String?,
     val isNaturalBlackjack: Boolean,
-    val chipChange: Double
+    // null avant le règlement, distinct de 0.0 (égalité réglée).
+    val chipChange: Double?
 )

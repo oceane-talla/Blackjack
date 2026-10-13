@@ -1,6 +1,7 @@
 package com.example.blackjack.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -20,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.blackjack.viewmodel.GameViewModel
@@ -29,6 +32,8 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.blackjack.R
+import com.example.blackjack.ui.components.chipText
+import com.example.blackjack.viewmodel.GameError
 import com.example.blackjack.ui.navigation.BlackjackDestination
 import com.example.blackjack.ui.navigation.BlackjackNavHost
 
@@ -47,6 +52,48 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
     } else {
         currentRoute
     }
+    fun openBetScreen() {
+        navController.clearBackStack(BlackjackDestination.BET)
+        navController.navigate(BlackjackDestination.BET) {
+            popUpTo(BlackjackDestination.HOME)
+            launchSingleTop = true
+        }
+    }
+    val fabLabel = when (currentRoute) {
+        BlackjackDestination.BET -> if (resumeRound) R.string.resume_game else R.string.open_table
+        BlackjackDestination.GAME -> when {
+            gameState.canHit -> R.string.hit
+            gameState.canChangeBet -> R.string.new_game
+            else -> R.string.hit
+        }
+        else -> if (resumeRound) R.string.resume_game else R.string.new_game
+    }
+    val fabEnabled = when (currentRoute) {
+        BlackjackDestination.BET -> gameState.canStartGame || resumeRound
+        BlackjackDestination.GAME -> gameState.canHit || gameState.canChangeBet
+        else -> true
+    }
+    val onFabClick: () -> Unit = when (currentRoute) {
+        BlackjackDestination.BET -> if (resumeRound) {
+            { navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true } }
+        } else {
+            {
+                if (gameViewModel.startGame()) {
+                    navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true }
+                }
+            }
+        }
+        BlackjackDestination.GAME -> when {
+            gameState.canHit -> ({ gameViewModel.hit() })
+            gameState.canChangeBet -> ({ openBetScreen() })
+            else -> ({ })
+        }
+        else -> if (resumeRound) {
+            { navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true } }
+        } else {
+            { openBetScreen() }
+        }
+    }
     val tabRoutes = listOf(
         BlackjackDestination.HOME,
         BlackjackDestination.BET,
@@ -59,7 +106,21 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(destinationTitle(currentRoute))) },
+                title = {
+                    Column {
+                        Text(stringResource(destinationTitle(currentRoute)))
+                        // Le même état que Mise/Partie; aucun accès à Room depuis Compose.
+                        val balance = if (gameState.isLoadingBalance ||
+                            gameState.error == GameError.BALANCE_LOAD_FAILED
+                        ) "—" else chipText(gameState.chips)
+                        Text(
+                            stringResource(R.string.balance_amount, balance),
+                            modifier = Modifier.testTag("global_balance"),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 navigationIcon = {
                     if (currentRoute == BlackjackDestination.BET ||
                         currentRoute == BlackjackDestination.GAME
@@ -116,25 +177,18 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                modifier = Modifier.testTag("new_game_fab"),
-                onClick = {
-                    if (resumeRound) {
-                        navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true }
-                    } else {
-                        // Une nouvelle préparation ne restaure pas une ancienne table.
-                        navController.clearBackStack(BlackjackDestination.BET)
-                        navController.navigate(BlackjackDestination.BET) {
-                            popUpTo(BlackjackDestination.HOME)
-                            launchSingleTop = true
-                        }
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.testTag("new_game_fab").then(
+                    if (fabEnabled) Modifier else Modifier.semantics { disabled() }
+                ),
+                onClick = if (fabEnabled) onFabClick else ({ }),
+                containerColor = if (fabEnabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                contentColor = if (fabEnabled) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                 icon = {
                     Icon(painterResource(R.drawable.ic_add), contentDescription = null)
                 },
-                text = { Text(stringResource(if (resumeRound) R.string.resume_game else R.string.new_game)) }
+                text = { Text(stringResource(fabLabel)) }
             )
         }
     ) { innerPadding ->

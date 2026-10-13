@@ -14,7 +14,8 @@ class BlackjackApplication : Application() {
     val database: BlackjackDatabase by lazy {
         Room.databaseBuilder<BlackjackDatabase>(applicationContext, "blackjack.db")
             .setDriver(AndroidSQLiteDriver())
-            .addMigrations(BlackjackDatabase.MIGRATION_1_2)
+            .addMigrations(BlackjackDatabase.MIGRATION_1_2, BlackjackDatabase.MIGRATION_2_3,
+                BlackjackDatabase.MIGRATION_3_4)
             .build()
     }
 

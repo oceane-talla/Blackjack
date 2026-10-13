@@ -1,5 +1,22 @@
 # Package model
 
+Restauration ajoutée le 12 octobre 2026 : `Shoe(savedCards)` copie un sabot
+ordonné sans le mélanger; `remainingCardList` fournit une copie de ses cartes.
+`BlackjackGame.restore()` reconstruit les mains à partir des `DealtCard`,
+restaure leurs résultats, la main active et la phase, sans distribution ni
+paiement. Le modèle ne reçoit aucune Entity Room. L'ordre de distribution,
+les références de mains et la cohérence du résultat global sont vérifiés;
+ce n'est pas encore une validation complète de toute sauvegarde corrompue.
+Une phase interrompue reste interrompue; restaurer une phase DEALER_TURN ne
+relance pas automatiquement le croupier. Le branchement au ViewModel reste
+à faire, donc aucune reprise après fermeture n'est encore démontrée dans l'UI.
+
+Compilation et 108 tests Kotlin réussis, dont sept tests dans
+`GameRestorationTest` : ordre du sabot, copies indépendantes, continuation
+standard et Split, blackjack naturel, As séparés, interruption et données
+invalides. Aucun nouveau test Android pour cette étape limitée au modèle.
+PB-11 et PB-15 avancent, sans modification du backlog Excel ni action Git.
+
 Ce package contient les bases du Blackjack en Kotlin, indépendantes de
 l'interface Android et de la base de données.
 
@@ -89,15 +106,46 @@ l'ordre et le destinataire de chaque carte.
 
 `calculateChipChange(bet)` fournit une variation nette en `Double` pour
 une partie terminée et une mise positive : défaite `-bet`, égalité `0`,
-victoire ordinaire `+bet`, Blackjack naturel gagnant `+1.5 * bet`, selon
-le choix A de l'utilisateur. Deux Blackjacks naturels restent une égalité.
+victoire ordinaire `+bet`, Blackjack naturel gagnant `+2 * bet`, conformément
+à l'énoncé (page 4). Deux Blackjacks naturels restent une égalité.
 La fonction ne modifie pas un solde : celui-ci sera géré à son étape.
 `validateBet(amount, availableChips)` accepte les montants de 1 à 100
 qui ne dépassent pas un solde fini. `GameViewModel` utilise cette validation
 et applique la variation nette au solde une seule fois à la fin de la partie.
-Le Split reste à implémenter.
-Les écrans ne sont pas encore branchés; le ViewModel fournit déjà un
-état qui masque la deuxième carte du croupier pendant le tour du joueur.
+Le modèle gère maintenant le Split (voir ci-dessous). Son branchement au
+repository, au ViewModel et au bouton de l'écran reste à réaliser.
+La partie standard est branchée; le ViewModel masque la première carte
+du croupier pendant le tour du joueur.
+
+### Split dans le modèle — 12 octobre 2026
+
+`split(bet, availableChips)` vérifie d'abord `canSplit()` : deux cartes de
+même rang, solde couvrant les deux mises et aucun Split déjà effectué.
+Il crée deux mains, puis distribue une carte à chacune. La deuxième carte
+initiale du joueur appartient désormais à la main 2; son `drawOrder` ne
+change pas, et aucune carte n'est repigée ou dupliquée dans le suivi.
+
+`playerHands` fournit une liste de `PlayerHandState`, des copies consultables
+contenant numéro, cartes, total, indicateur de Blackjack et résultat.
+`activeHandIndex` vaut 0 puis 1 : `playerCards`, `playerValue`, `hit()` et
+`stand()` concernent cette main active. Rester, dépasser 21 ou atteindre 21
+passe à la seconde main; le croupier joue après l'arrêt des deux mains.
+Si elles sont toutes perdues par dépassement, il n'a pas besoin de tirer.
+
+Choix A/B/B de l'utilisateur (règle corrigée le 12 octobre) : un 21 après
+Split est ordinaire, payé une fois la mise s'il gagne, et fait égalité contre
+un 21 du croupier. Il n'est jamais marqué comme Blackjack naturel.
+Chaque As séparé reçoit une seule carte
+et s'arrête automatiquement; des résultats différents produisent le résumé
+`MIXED`, même si le bilan de jetons est positif ou négatif. Chaque main
+garde WIN, LOSS ou DRAW. `calculateHandChipChange(handNumber, bet)` calcule
+son paiement; `calculateChipChange(bet)` additionne les deux. Le modèle ne
+modifie pas lui-même un solde. Un tirage impossible interrompt la partie
+sans autoriser son règlement.
+
+Le repository refuse temporairement les parties avec Split : il faut encore
+adapter sa conversion des deux mains avant toute sauvegarde. Aucun bouton
+Split n'est ajouté à l'interface par cette étape.
 
 Les tests se trouvent dans `app/src/test/java/com/example/blackjack/model` :
 `CardTest`, `HandTest`, `ShoeTest` et `BlackjackGameTest`. Ils s'exécutent

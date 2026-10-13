@@ -4,34 +4,39 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.blackjack.repository.BlackjackRepository
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 
 // Observe les parties sauvegardées en passant uniquement par le repository.
 class HistoryViewModel(private val repository: BlackjackRepository) : ViewModel() {
-    // Le ViewModel peut modifier l'état ; l'écran reçoit un accès en lecture seule.
-    private val _uiState = MutableStateFlow(HistoryUiState())
-    val uiState: StateFlow<HistoryUiState> = _uiState.asStateFlow()
-
-    // init s'exécute à la création de cette instance : une seule observation est démarrée.
-    init {
-        // La coroutine est annulée lorsque le ViewModel est définitivement supprimé.
-        viewModelScope.launch {
+    val uiState: StateFlow<HistoryUiState> = flow {
+        // Propre à chaque reprise de l'observation; conserve la liste en cas d'erreur.
+        var lastState = HistoryUiState()
+        emitAll(
             repository.observeHistory()
-                // catch traite les erreurs du Flow, sans transformer son annulation en erreur.
+                // map transforme chaque liste de Room en données pour l'écran.
+                .map { games ->
+                    lastState = HistoryUiState(games = games, isLoading = false)
+                    lastState
+                }
+                // catch laisse passer l'annulation et publie une erreur de lecture.
                 .catch { exception ->
                     Log.e("HistoryViewModel", "Failed to observe game history.", exception)
-                    // copy conserve la dernière liste reçue si la lecture échoue ensuite.
-                    _uiState.value = _uiState.value.copy(isLoading = false, hasError = true)
+                    emit(lastState.copy(isLoading = false, hasError = true))
                 }
-                .collect { games ->
-                    // Room émet la liste initiale, puis une nouvelle liste lorsque les données changent.
-                    // Aucun bouton de rechargement n'est nécessaire pour voir une nouvelle partie.
-                    _uiState.value = HistoryUiState(games = games, isLoading = false)
-                }
-        }
-    }
+        )
+    }.stateIn(
+        // L'observation est annulée lorsque le ViewModel est détruit.
+        scope = viewModelScope,
+        // Démarre au premier abonné; s'arrête 5 secondes après le départ du dernier.
+        // L'écran s'abonne avec collectAsStateWithLifecycle(), comme dans Atelier3.
+        started = SharingStarted.WhileSubscribed(5_000),
+        // Disponible immédiatement, avant la première réponse de Room.
+        initialValue = HistoryUiState()
+    )
 }

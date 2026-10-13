@@ -17,22 +17,27 @@ import kotlinx.coroutines.launch
 class GameViewModel internal constructor(
     // Intermédiaire pour sauvegarder une partie, sans accéder directement au DAO ou à Room.
     private val repository: BlackjackRepository,
-    // Fonction créant une nouvelle partie ; les tests peuvent fournir des cartes prévisibles.
-    private val createGame: (Int) -> BlackjackGame
+    // Les tests peuvent préparer un sabot presque vide pour vérifier son renouvellement.
+    private val createShoe: (Int) -> Shoe = { Shoe(numberOfDecks = it) },
+    // Une nouvelle partie peut recevoir le sabot déjà utilisé par la précédente.
+    private val createGame: (Shoe) -> BlackjackGame
 ) : ViewModel() {
-    // Chaque partie reçoit un sabot neuf contenant le nombre de paquets choisi.
+    // Le ViewModel conserve le sabot; le modèle conserve seulement la partie courante.
     constructor(repository: BlackjackRepository) : this(
         repository,
-        { deckCount -> BlackjackGame(Shoe(numberOfDecks = deckCount)) }
+        createGame = { shoe -> BlackjackGame(shoe) }
     )
 
     // Modèle contenant la partie réelle, ses règles et la carte cachée du croupier.
-    private var game = createGame(1)
+    private var shoe = createShoe(1)
+    private var game = createGame(shoe)
     private var gameDeckCount = 1
     // Empêche d'ajouter ou de retirer les jetons plusieurs fois pour la même partie.
     private var roundSettled = false
     // Date de fin en millisecondes, conservée si la sauvegarde doit être réessayée.
     private var finishedAt: Long = 0
+    private var progressId: Long = 0
+    private var startedAt: Long = 0
 
     // État observable modifiable uniquement à l'intérieur du ViewModel.
     private val _uiState = MutableStateFlow(GameUiState())
@@ -50,12 +55,27 @@ class GameViewModel internal constructor(
         }
     }
 
-    // Attend Room avant d'autoriser une partie : 1000 n'est pas un solde de secours.
+    // Attend le solde et la partie sauvegardée avant d'autoriser les actions.
     private fun loadBalance() {
         _uiState.value = _uiState.value.copy(isLoadingBalance = true, canStartGame = false, error = null)
         viewModelScope.launch {
             try {
                 val chips = repository.loadBalance()
+                val restored = repository.restoreGameProgress()
+                if (restored != null) {
+                    shoe = restored.shoe
+                    game = restored.game
+                    gameDeckCount = restored.deckCount
+                    progressId = restored.gameId
+                    startedAt = restored.playedAt
+                    _uiState.value = _uiState.value.copy(
+                        chips = chips,
+                        selectedBet = restored.bet, roundBet = restored.bet,
+                        selectedDeckCount = restored.deckCount
+                    )
+                    publishGameState(save = false)
+                    return@launch
+                }
                 _uiState.value = _uiState.value.copy(
                     chips = chips, isLoadingBalance = false,
                     canStartGame = game.validateBet(_uiState.value.selectedBet, chips)
@@ -98,13 +118,18 @@ class GameViewModel internal constructor(
     fun startGame(): Boolean {
         if (!_uiState.value.canStartGame) return false
 
-        // Remplace aussi le premier sabot si le choix a changé avant de distribuer.
+        // Quatre cartes suffisent à la distribution initiale (choix A).
+        // Aucun renouvellement en plein tour : un épuisement reste une interruption.
         val deckCount = _uiState.value.selectedDeckCount
-        if (game.phase != GamePhase.READY || gameDeckCount != deckCount) {
-            game = createGame(deckCount)
+        val replaceShoe = gameDeckCount != deckCount || shoe.remainingCards < 4
+        if (replaceShoe) {
+            shoe = createShoe(deckCount)
             gameDeckCount = deckCount
         }
+        if (game.phase != GamePhase.READY || replaceShoe) game = createGame(shoe)
         roundSettled = false
+        progressId = 0
+        startedAt = System.currentTimeMillis()
         // Fixe la mise de cette partie et efface les informations du règlement précédent.
         // Le solde reste inchangé : seule la variation nette sera appliquée à la fin.
         _uiState.value = _uiState.value.copy(
@@ -133,13 +158,23 @@ class GameViewModel internal constructor(
         return accepted
     }
 
+    // Demande au modèle de séparer la paire, puis sauvegarde les deux mains avec la même partie.
+    fun split(): Boolean {
+        val state = _uiState.value
+        if (!state.canSplit) return false
+
+        val accepted = game.split(checkNotNull(state.roundBet), state.chips)
+        publishGameState()
+        return accepted
+    }
+
     // Réessaie seulement la sauvegarde : ne rejoue pas et ne règle pas à nouveau les jetons.
     fun retrySave() {
-        if (_uiState.value.canRetrySave) saveFinishedGame()
+        if (_uiState.value.canRetrySave) saveCurrentGame()
     }
 
     // Après une action, transforme les données du modèle en état destiné à l'écran.
-    private fun publishGameState() {
+    private fun publishGameState(save: Boolean = true) {
         val state = _uiState.value
         val finished = game.phase == GamePhase.FINISHED
         // Vrai uniquement si cette partie est terminée mais n'a pas encore été réglée.
@@ -155,15 +190,18 @@ class GameViewModel internal constructor(
             finishedAt = System.currentTimeMillis()
         }
 
-        // Pendant le tour du joueur, l'écran ne doit pas connaître la deuxième carte ni le total.
+        // L'énoncé cache la première carte du croupier pendant le tour du joueur.
         val hideDealerCard = game.phase == GamePhase.PLAYER_TURN
         _uiState.value = state.copy(
+            isLoadingBalance = false,
             chips = chips,
             playerCards = game.playerCards,
+            playerHands = game.playerHands,
+            activeHandIndex = game.activeHandIndex,
             dealerCards = game.dealerCards.mapIndexed { index, card ->
-                // Les indices commencent à 0 : 1 désigne la deuxième carte.
+                // Les indices commencent à 0 : 0 désigne la première carte.
                 // null masque seulement l'affichage ; la vraie carte reste dans le modèle.
-                if (hideDealerCard && index == 1) null else card
+                if (hideDealerCard && index == 0) null else card
             },
             playerTotal = game.playerValue,
             dealerTotal = if (hideDealerCard) null else game.dealerValue,
@@ -173,36 +211,51 @@ class GameViewModel internal constructor(
             chipChange = chipChange,
             // Attend le règlement et la sauvegarde avant d'autoriser une nouvelle partie.
             // La mise sélectionnée doit aussi rester compatible avec le nouveau solde.
-            canStartGame = !game.canHit && !newlyFinished &&
+            canStartGame = game.phase in listOf(GamePhase.READY, GamePhase.FINISHED, GamePhase.INTERRUPTED) && !newlyFinished &&
                 game.validateBet(state.selectedBet, chips),
             canHit = game.canHit,
             canStand = game.canStand,
+            canSplit = !state.isSaving && state.error != GameError.SAVE_FAILED &&
+                state.roundBet?.let { game.canSplit(it, chips) } == true,
             error = if (game.phase == GamePhase.INTERRUPTED) GameError.ROUND_INTERRUPTED else null
         )
-        // Déclenche automatiquement l'enregistrement lorsqu'une partie vient de se terminer.
-        if (newlyFinished) saveFinishedGame()
+        // Chaque action sauvegarde l'état; une restauration seule ne réécrit pas les données.
+        if (save) saveCurrentGame()
     }
 
-    // Confie la partie terminée au repository et publie le succès ou l'échec de l'enregistrement.
-    private fun saveFinishedGame() {
+    // Sauvegarde la progression, le règlement ou l'interruption selon la phase du modèle.
+    private fun saveCurrentGame() {
         val state = _uiState.value
         // Le résultat reste stable jusqu'à la fin de cette sauvegarde ou de sa reprise.
         val finishedGame = game
         val bet = checkNotNull(state.roundBet)
-        val playedAt = finishedAt
+        val playedAt = if (game.phase == GamePhase.FINISHED) finishedAt else startedAt
         // Empêche une nouvelle partie de remplacer celle qu'on est en train de sauvegarder.
-        _uiState.value = state.copy(isSaving = true, canStartGame = false, error = null)
+        _uiState.value = state.copy(isSaving = true, canStartGame = false,
+            canHit = false, canStand = false, canSplit = false, error = null)
 
         // Lance une coroutine liée au ViewModel pour attendre l'écriture sans bloquer l'interface.
         viewModelScope.launch {
             try {
                 // Le repository passe par le DAO et Room, puis retourne l'identifiant créé.
-                val id = repository.saveFinishedGame(finishedGame, bet, playedAt)
+                val id = when {
+                    finishedGame.phase != GamePhase.FINISHED -> repository.saveGameProgress(
+                        finishedGame, bet, gameDeckCount, shoe.remainingCardList, progressId, playedAt)
+                    progressId > 0 -> repository.finishGameProgress(
+                        finishedGame, bet, gameDeckCount, shoe.remainingCardList, progressId, playedAt)
+                    // Un blackjack à la distribution est déjà terminé, sans progression préalable.
+                    else -> repository.saveFinishedGame(finishedGame, bet, playedAt)
+                }
+                progressId = id
                 // Rend la main à l'écran et autorise une nouvelle partie si la mise est abordable.
                 _uiState.value = _uiState.value.copy(
                     isSaving = false,
-                    savedGameId = id,
-                    canStartGame = game.validateBet(bet, _uiState.value.chips)
+                    savedGameId = if (game.phase == GamePhase.FINISHED) id else null,
+                    canHit = game.canHit, canStand = game.canStand,
+                    canSplit = game.canSplit(bet, _uiState.value.chips),
+                    error = if (game.phase == GamePhase.INTERRUPTED) GameError.ROUND_INTERRUPTED else null,
+                    canStartGame = game.phase in listOf(GamePhase.FINISHED, GamePhase.INTERRUPTED) &&
+                        game.validateBet(bet, _uiState.value.chips)
                 )
             } catch (exception: CancellationException) {
                 // Une annulation de coroutine doit se propager, sans devenir une erreur de sauvegarde.

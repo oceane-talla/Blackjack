@@ -26,10 +26,11 @@ fun chipText(value: Double): String = NumberFormat.getNumberInstance().apply {
     maximumFractionDigits = 1
 }.format(value)
 
-fun resultLabel(result: String): Int = when (result) {
+fun resultLabel(result: String?): Int = when (result) {
     GameResult.WIN.name -> R.string.result_win
     GameResult.LOSS.name -> R.string.result_loss
     GameResult.DRAW.name -> R.string.result_draw
+    GameResult.MIXED.name -> R.string.result_mixed
     else -> R.string.result_unknown
 }
 

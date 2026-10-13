@@ -1,16 +1,95 @@
-# Blackjack Android — rôle des fichiers et fonctions prévues
+# Blackjack Android — architecture actuelle et guide de démonstration
 
-Document de travail mis à jour le 12 octobre 2026, basé sur notre discussion et les contraintes consignées dans `AGENTS.md`.
+Mise à jour : 13 octobre 2026. Ce résumé décrit le code présent dans l’espace de travail local.
 
-## Comment lire ce document
+> **État de la remise Git vérifié le 13 octobre 2026 :** la branche locale `main` et `origin/main` pointent toutes deux vers `004ab1d` (`Ajoute les ViewModels, le jeu et le solde persistant`). Le clone de ce commit compile, mais ne contient pas les changements locaux décrits ici. L’espace de travail comporte 42 fichiers suivis modifiés et 7 nouveaux fichiers non suivis; rien n’a été commité ni poussé. L’enseignant ne verra donc pas encore la version décrite dans ce document.
 
-Ce document décrit la structure visée et sert à comprendre où placer chaque responsabilité. Les noms des fonctions proposées pourront être ajustés ensemble avant leur implémentation. Leur présence ici ne signifie pas que le code existe déjà ni que toutes les décisions sont prises.
+## Résumé de l’architecture actuelle
 
-**État actuel :** `MainActivity`, `BlackjackApp`, `BlackjackDestination`, `BlackjackNavHost`, les cinq écrans, `ScreenContent` et les fichiers du thème existent. Les écrans sont branchés aux ViewModels : mise, partie standard, historique et statistiques sont affichés dans une interface verte et dorée. Les vérifications de cette intégration sont consignées à la fin du document. `Card`, `Hand`, `Shoe`, `DealtCard` et la partie standard de `BlackjackGame` sont implémentés, avec le suivi des distributions, la validation des mises et le calcul de variation nette des jetons. Room 3.0.3 et KSP sont configurés; les quatre Entity (dont `PlayerBalanceEntity` pour le solde), `BlackjackDao`, `BlackjackDatabase` et `BlackjackRepository` existent. `GameViewModel` et `GameUiState` coordonnent le jeu, le solde et la sauvegarde. `HistoryViewModel` et `StatisticsViewModel` exposent les lectures observables du repository, avec leurs états d'affichage. Les statistiques sont calculées par SQLite et retournées dans `GameStatistics`. `BlackjackApplication` partage la base et le repository; `BlackjackViewModelFactory` construit les trois ViewModels, récupérés avec une portée Activity dans `MainActivity`. Le branchement observe les StateFlow avec collectAsStateWithLifecycle(). Les vérifications figurent à la section 9.
+L’application est écrite en Kotlin avec Jetpack Compose et utilise une seule `MainActivity`. `BlackjackApp` construit le `Scaffold` commun : barre supérieure avec le solde, navigation inférieure et FAB adapté au contexte. `BlackjackNavHost` relie Accueil, Mise, Partie, Historique et Statistiques. La navigation change l’écran; elle ne porte pas les règles du Blackjack.
 
-`HomeScreen` est conservé conformément à ton choix et se trouve maintenant dans `ui/screens/home`. La navigation a été extraite dans `ui/navigation/BlackjackNavHost.kt`.
+`MainActivity` obtient trois ViewModels (`GameViewModel`, `HistoryViewModel` et `StatisticsViewModel`) à portée Activity avec `BlackjackViewModelFactory`. Ils partagent le même `BlackjackRepository`, fourni par l’unique `BlackjackApplication`. Une rotation recrée l’Activity, mais conserve ces ViewModels. Compose observe les états exposés en `StateFlow` avec `collectAsStateWithLifecycle()`.
 
-## Arborescence visée
+La chaîne de données est :
+
+```text
+Compose → ViewModel → Repository → DAO → Room → SQLite
+```
+
+Le jeu suit un trajet distinct jusqu’aux règles : `Compose → GameViewModel → BlackjackGame`. Le composable envoie un événement, le ViewModel demande au modèle d’appliquer la règle, puis publie un nouvel `GameUiState`. Le ViewModel ne lit jamais directement le DAO et l’interface ne décide ni du résultat ni du paiement.
+
+| Zone | Fichiers importants | Responsabilité actuelle |
+| --- | --- | --- |
+| Entrée Android et services partagés | `MainActivity.kt`, `BlackjackApplication.kt` | Une Activity; base Room et repository partagés à l’échelle de l’application. |
+| Interface | `ui/BlackjackApp.kt`, `ui/screens/*`, `ui/components/*` | Afficher l’état, les cartes graphiques et les actions disponibles. |
+| Navigation | `ui/navigation/BlackjackDestination.kt`, `BlackjackNavHost.kt` | Routes et passage entre les destinations. |
+| ViewModels | `viewmodel/GameViewModel.kt`, `HistoryViewModel.kt`, `StatisticsViewModel.kt` et leurs états | Recevoir les actions, coordonner modèle/données, publier les StateFlow. |
+| Règles | `model/Card.kt`, `Hand.kt`, `Shoe.kt`, `BlackjackGame.kt` | Valeur des cartes, tours, sabot, Split et résultats; aucune dépendance à Compose ou Room. |
+| Accès aux données | `repository/BlackjackRepository.kt` | Convertir les objets du modèle et fournir le point d’accès aux données pour les ViewModels. |
+| Persistance | `database/BlackjackDatabase.kt`, `database/dao/BlackjackDao.kt`, `database/entity/*` | Transactions Room, requêtes SQLite, historique, solde et progression. |
+
+## Parcours d’une action
+
+1. Le joueur touche Tirer, Rester ou Split dans `GameScreen`.
+2. `BlackjackNavHost` transmet le callback au `GameViewModel` partagé.
+3. Le ViewModel appelle `BlackjackGame.hit()`, `stand()` ou `split()`. Le modèle valide l’action et met à jour ses mains et sa phase.
+4. Le ViewModel transforme le modèle en `GameUiState`. Le `StateFlow` émet la nouvelle valeur et Compose redessine les mains, le total et les boutons autorisés.
+5. Dans une coroutine de `viewModelScope`, le ViewModel demande au repository de sauvegarder la progression. Room et SQLite conservent les cartes distribuées et le sabot restant.
+6. À la fin, le modèle calcule la variation nette. Le repository demande au DAO d’enregistrer partie, mains, cartes et solde dans une transaction. Une reprise de sauvegarde ne rejoue pas le tour et ne paie pas deux fois.
+
+L’historique et les statistiques suivent la même chaîne de couches. Le DAO expose des `Flow` calculés par Room/SQLite; les ViewModels les transforment en états d’écran. Les statistiques viennent des données persistées, dont le nombre et la proportion des cartes observées par rang et par couleur/enseigne.
+
+## Règles et décisions visibles dans le code
+
+- Le joueur commence à 1000 jetons sur une nouvelle base. La mise choisie est de 1 à 100, reste sélectionnée jusqu’à modification et ne peut pas dépasser le solde. Le solde n’est réglé qu’à la fin : victoire ordinaire `+mise`, défaite `−mise`, égalité `0`, Blackjack naturel gagnant `+2 × mise`.
+- Un sabot contient 1 à 8 paquets configurables. Les cartes sont mélangées dans le modèle et retirées à la pige. Il est remplacé avant une nouvelle partie si le nombre de paquets change ou s’il reste moins de quatre cartes.
+- La distribution initiale alterne joueur, croupier, joueur, croupier. La première carte du croupier est masquée pendant le tour du joueur. Le croupier tire sous 17 et arrête sur tout 17 ou plus, y compris un 17 souple.
+- Un Split est offert pour une paire de même rang, pendant le tour du joueur et seulement si le solde peut couvrir les deux mises. Le projet permet un seul Split par partie. Les mains se jouent successivement contre le même croupier; un 21 après Split n’est pas un Blackjack naturel. Après séparation d’As, chaque As reçoit une carte et la main s’arrête.
+- La base Room, partagée par l’application, est en version 4 et possède les entités `GameEntity`, `HandEntity`, `DrawnCardEntity`, `PlayerBalanceEntity` et `ShoeCardEntity`. Les migrations 1→2, 2→3 et 3→4 conservent les données antérieures. Une partie en cours, son sabot, sa mise et sa phase sont restaurés au démarrage.
+- `card_spades.xml`, `card_hearts.xml`, `card_diamonds.xml`, `card_clubs.xml` et `card_back.xml` fournissent les représentations graphiques des cartes.
+
+## Déroulé proposé pour la démonstration
+
+Prévoir environ 6 à 8 minutes et garder l’application sur un émulateur Pixel 8 en portrait. Les cartes sont aléatoires pendant une partie normale; le Split n’apparaît que si les deux premières cartes sont une paire. Pour une démonstration garantie du Split, utiliser le test Compose déterministe décrit plus bas.
+
+1. **Accueil et navigation :** montrer le solde dans la barre supérieure et les destinations Accueil, Jouer, Historique et Statistiques. Expliquer qu’elles appartiennent à la même Activity.
+2. **Mise :** choisir une mise basse, montrer le sélecteur de 1 à 8 paquets et le FAB qui lance la distribution. Le solde initial est 1000 sur une installation neuve; sur un appareil déjà utilisé, Room restaure le solde précédent.
+3. **Table :** montrer les images de cartes, les deux cartes du joueur et la première carte du croupier masquée. Appuyer sur Tirer puis Rester; les règles sont appliquées par `BlackjackGame`, pas par le composable. Faire remarquer que les actions indisponibles sont désactivées ou absentes.
+4. **Résultat :** expliquer la variation nette des jetons et la sauvegarde. La TopAppBar, l’historique et les statistiques reflètent le même solde et les données persistées.
+5. **Split :** si une paire apparaît, montrer que Split devient disponible, que les deux mains sont identifiées et jouées l’une après l’autre, puis que chaque résultat est conservé. Si aucune paire ne sort, ne pas prétendre que le tirage a échoué : lancer le scénario déterministe ci-dessous.
+6. **Historique et statistiques :** ouvrir les deux destinations et montrer la partie enregistrée, ses résultats, les comptes et proportions calculés depuis Room/SQLite.
+7. **Rotation et réouverture :** tourner l’émulateur, puis éventuellement forcer l’arrêt et relancer l’application pour montrer la restauration de la progression sauvegardée. Ce parcours est pris en charge et la persistance disque est testée; répéter cette manipulation sur l’appareil de présentation avant la classe.
+
+Pour expliquer le Split en une phrase : « Le bouton envoie un événement au ViewModel; le modèle sépare les mains et vérifie les règles; le ViewModel expose le nouvel état; le repository et Room enregistrent la progression et le règlement. »
+
+### Vérifications reproductibles
+
+À la racine du projet, les commandes suivantes vérifient la compilation et les tests Kotlin :
+
+```powershell
+.\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest --offline --no-configuration-cache --console=plain
+.\gradlew.bat :app:testDebugUnitTest --offline --no-configuration-cache --console=plain
+```
+
+Pour exécuter le parcours complet et déterministe du Split sur un Pixel 8 connecté :
+
+```powershell
+$env:ANDROID_SERIAL = "emulator-5556"
+.\gradlew.bat :app:connectedDebugAndroidTest --offline --no-configuration-cache --console=plain "-Pandroid.testInstrumentationRunnerArguments.class=com.example.blackjack.GameplayUiInstrumentedTest#splitJourneySettlesBothResultsAndUpdatesHistoryAndStatistics"
+```
+
+Le test utilise des cartes ordonnées et une base Room en mémoire. Il vérifie la seconde mise, les tours des deux mains, des résultats différents, le paiement unique, l’historique et les statistiques. Il a réussi sur Pixel 8 en portrait et en paysage. Les tests unitaires complets ont réussi. Les validations instrumentées ciblées de navigation/retour, rotation, mises impossibles et persistance ont aussi réussi. La suite instrumentée totale compte 140 tests; une tentative a été interrompue à 10/140 sans résultat global. Ne pas présenter les 140 comme tous réussis.
+
+## Situation de la remise
+
+Le dépôt configuré est `https://github.com/oceane-talla/Blackjack.git`. Une lecture de `origin/main` puis une compilation du clone temporaire ont confirmé que le commit `004ab1d` compile (`:app:assembleDebug` réussi), mais cette copie ne contient pas le travail récent. La version locale doit être compilée et revue, puis les fichiers voulus doivent être commités et poussés avant que l’enseignant puisse les consulter. Aucun commit ni push n’a été fait dans cette préparation.
+
+---
+
+## Notes de conception et d’avancement antérieures
+
+Les sections qui suivent conservent le journal technique accumulé pendant le développement. Leur statut « prévu », « à faire » ou « en attente » décrit l’étape datée où la note a été écrite et peut donc être dépassé par l’état actuel résumé ci-dessus. Pour connaître le code présent, le résumé actuel et les fichiers source font autorité.
+## Repère historique — arborescence initialement visée
 
 ```text
 com.example.blackjack
@@ -64,10 +143,81 @@ com.example.blackjack
         ├── GameEntity.kt
         ├── HandEntity.kt
         ├── DrawnCardEntity.kt
-        └── PlayerBalanceEntity.kt
+        ├── PlayerBalanceEntity.kt
+        └── ShoeCardEntity.kt
 ```
 
+## Préparation du stockage de reprise — schéma Room 4
+
+Le choix A ajoute une cinquième Entity, `ShoeCardEntity`, et trois colonnes
+dans `GameEntity` : `phase`, `activeHandIndex` et `deckCount`.
+La mise, les mains et les cartes distribuées gardent leurs tables existantes.
+`shoe_cards` conserve les cartes restantes dans leur ordre, avec une clé
+primaire `(gameId, position)` et une clé étrangère vers `games`. Les cartes
+identiques de plusieurs paquets sont autorisées à des positions différentes.
+La liste chargée dans l'ordre croissant des positions correspondra à celle
+de `Shoe`, qui tire sa dernière carte. Ces cartes ne sont pas des distributions
+et ne participent pas aux statistiques.
+
+`MIGRATION_3_4` conserve l'historique et le solde. Les nouvelles colonnes
+restent `null` dans les anciennes sauvegardes : leur état de reprise est inconnu.
+La migration est enregistrée dans `BlackjackApplication`.
+Le DAO propose maintenant `saveGameProgress()` et `loadGameProgress()`.
+Ces transactions enregistrent et relisent la même partie avec ses mains,
+distributions et cartes restantes, sans modifier le solde. `GameProgress`,
+déclarée avec le DAO, regroupe ces données sans créer de nouvelle table.
+`finishGameProgress()` termine la partie avec cet identifiant et paie une seule
+fois. La transaction conserve aussi les dernières cartes et le sabot final;
+une erreur restaure la progression et le solde précédents. Une nouvelle demande
+identique retourne l'identifiant sans réécriture ni paiement supplémentaire.
+Le repository expose ces opérations; le modèle et le ViewModel doivent encore être branchés pour sauvegarder et restaurer
+une partie en cours. La reprise complète n'est pas déclarée terminée.
+
+Vérification de ce bloc : compilation, 101 tests unitaires et 47 tests Android
+ciblés réussis sur Pixel 8. Les migrations 1/2/3 vers 4, les positions du sabot,
+ses exemplaires identiques, les contraintes et les statistiques sont vérifiés.
+Le scénario de sauvegarde finale depuis l'interface passe en portrait.
+La reprise après arrêt du processus reste à implémenter et à démontrer.
+PB-11 et PB-15 concernés; aucun statut Excel, commit ou push dans ce bloc.
+
+Vérification complémentaire du bloc DAO de progression : compilation,
+101 tests unitaires et 55 tests Android ciblés réussis sur Pixel 8, dont
+neuf tests `GameProgressDaoTest`. La sauvegarde et sa lecture après
+réouverture conservent les listes ordonnées et le solde. Les erreurs annulent
+la première sauvegarde ou restaurent l'ancienne; une partie terminée ne peut
+pas être écrasée. Aucun nouvel événement d'interface n'est branché dans ce bloc.
+
+Vérification complémentaire du règlement de progression : compilation,
+101 tests unitaires et 64 tests Android ciblés réussis sur Pixel 8 (18,43 s),
+dont neuf tests `GameSettlementDaoTest`. Le paiement n'est appliqué qu'une fois,
+y compris pour des demandes concurrentes; les détails finaux et le sabot
+persistent après réouverture. Les échecs de carte, de sabot ou de paiement
+restaurent l'ancienne progression. Les résultats différents d'un Split sont
+conservés par main avec une seule variation nette. Le repository expose désormais
+cette opération; le ViewModel doit encore l'utiliser. PB-11 et PB-15
+restent en cours; aucun statut Excel, commit ou push dans ce bloc.
+
 ## Répartition générale des responsabilités
+
+Le bloc repository de progression est vérifié par compilation, 101 tests
+Kotlin et 74 tests Android ciblés sur Pixel 8 (19,317 s), dont dix nouveaux
+tests `GameProgressRepositoryTest`. `saveGameProgress()` convertit le modèle
+et le sabot ordonné sans paiement; `loadGameProgress()` relit les données;
+`finishGameProgress()` conserve l'identifiant et règle les mains, y compris
+après Split, via la transaction du DAO. Une répétition identique ne paie pas
+deux fois; une erreur conserve l'ancienne sauvegarde et le solde.
+Shoe fournit maintenant `remainingCardList` et un constructeur de restauration.
+`BlackjackGame.restore()` reconstruit les mains et l'état sans redistribuer;
+sept tests supplémentaires portent le total à 108 tests Kotlin réussis,
+avec compilation réussie. Le modèle reste indépendant de Room.
+Depuis le 13 octobre, GameViewModel restaure la partie au démarrage et sauvegarde
+après chaque action, en bloquant les actions pendant l'écriture. Le règlement
+réutilise l'identifiant de progression. Un blackjack immédiat garde le chemin
+final direct. Une interruption conserve ses cartes sans paiement avec le statut
+INTERRUPTED, permettant une nouvelle partie sans migration Room.
+Compilation, 108 tests Kotlin et 75 tests Android ciblés réussis sur Pixel_10_Pro.
+La recréation du ViewModel est testée; la fermeture réelle du processus sur Pixel 8
+reste à démontrer. Aucun statut Excel n'est modifié.
 
 | Partie | Responsabilité | Exemple |
 | --- | --- | --- |
@@ -327,7 +477,7 @@ et la dernière mise valide est conservée entre les parties.
 `selectedBet` décrit la prochaine mise et `roundBet` celle de la partie
 en cours ou terminée. Le règlement ne se produit qu'une fois. Une partie
 interrompue ne produit aucun paiement ni enregistrement. Le ViewModel
-fournit une entrée `null` pour la deuxième carte du croupier et un total
+fournit une entrée `null` pour la première carte du croupier et un total
 `null` pendant le tour du joueur, sans exposer ces valeurs cachées.
 
 La sauvegarde automatique passe par le repository dans `viewModelScope`.
@@ -499,8 +649,9 @@ Les noms sont des propositions : nous éviterons de créer plusieurs fonctions q
 `hit()`, `stand()`, `playDealerTurn()` et `determineResult()` sont
 implémentées pour une seule main. `calculateChipChange(bet)` calcule aussi
 les jetons : `-bet` pour une défaite, `0` pour une égalité, `+bet` pour une
-victoire ordinaire et `+1.5 * bet` pour un Blackjack naturel gagnant,
-selon le choix A de l'utilisateur. Deux Blackjacks naturels donnent `0`.
+victoire ordinaire et `+2 * bet` pour un Blackjack naturel gagnant,
+conformément à la correction du 12 octobre et à l'énoncé, page 4.
+Deux Blackjacks naturels donnent `0`.
 `validateBet(amount, availableChips)` accepte une mise de 1 à 100 abordable
 avec un solde fini. `GameViewModel` applique la variation au solde à la fin.
 Le Split reste à faire.
@@ -549,7 +700,7 @@ une interruption, il remet les mains à zéro en conservant la même source
 de cartes. Le nombre de paquets reste choisi par l'appelant.
 
 Le modèle conserve les cartes complètes du croupier pour calculer les
-résultats. Le masquage de sa deuxième carte devra être appliqué dans
+résultats. Le masquage de sa première carte devra être appliqué dans
 l'état destiné à l'interface lors du branchement du jeu.
 
 **Ce fichier ne contient pas de SQL.** Il produit le résultat du jeu; le ViewModel demande ensuite sa sauvegarde au repository.
@@ -1278,6 +1429,95 @@ statistiques. Les premiers lancements de l'instrumentation ont été interrompus
 avec `Process crashed`, sans diagnostic exploitable; les relances ciblée,
 complète et paysage ont réussi.
 
+## Corrections de conformité — 12 octobre 2026
+
+L'énoncé, pages 4 et 5, impose un gain net de deux fois la mise pour un
+Blackjack naturel gagnant et la première carte du croupier cachée. Le code
+applique maintenant ces deux règles : une mise de 5 gagne 10 jetons; deux
+Blackjacks naturels restent une égalité. `GameViewModel` publie `null` à
+l'indice 0 pendant le tour du joueur, puis révèle les vraies cartes à la fin.
+Les vraies cartes et leur ordre de distribution dans le modèle ne changent pas.
+
+Les tests du modèle, du repository, des ViewModels et de l'interface utilisent
+les nouveaux montants et le premier emplacement caché. Les montants anciens
+dans les bases existantes sont conservés; les tests de migration contenant
+des demi-jetons vérifient justement cette conservation. Les comptes rendus
+datés précédents décrivent l'ancienne règle, remplacée par cette correction.
+
+Cette étape concerne PB-06 et PB-07. Elle n'implémente pas le Split et ne
+modifie pas les statuts du backlog.
+
+Vérification : compilation des APK réussie et 79 tests unitaires réussis.
+Sur Pixel 8, 36 tests ciblés passent (`GameViewModelTest`,
+`BlackjackRepositoryTest`, `StatisticsViewModelTest`), puis deux tests Compose
+en portrait : Blackjack naturel à mise de 5 donnant un solde de 1010;
+carte cachée, révélation avec Rester, paiement et consultations de l'historique
+et des statistiques. Total : 38 tests Android réussis pour ce bloc. Le paysage
+n'est pas réexécuté : aucune disposition n'a changé, seuls le montant et
+l'emplacement de la carte masquée ont changé.
+
+Le premier lancement Android a échoué avec `INSTRUMENTATION_ABORTED: System
+has crashed`, puis le service ActivityManager était indisponible. Après un
+redémarrage à froid du Pixel 8 sans instantané, les tests ci-dessus ont réussi.
+
+## Modèle du Split — 12 octobre 2026
+
+**Correction ultérieure approuvée :** la règle A remplace le bonus décrit
+dans les décisions initiales ci-dessous. Un 21 après Split est ordinaire :
+gain net d'une fois la mise s'il gagne, égalité contre 21 et aucun indicateur
+de Blackjack naturel. Le croupier joue donc même si les deux mains du Split
+ont 21. L'arrêt après une seule carte pour chaque As et le résultat MIXED
+restent inchangés. Le bonus du Blackjack naturel de la distribution initiale
+reste celui de l'énoncé : deux fois la mise. Le modèle, les tests et son
+README sont alignés sur cette correction; aucune sauvegarde ni interface
+Split n'est branchée dans ce bloc.
+
+Vérification de cette correction : 101 tests unitaires réussis, dont 79 pour
+`BlackjackGame`; compilation des APK de l'application et des tests Android
+réussie. Les tests instrumentés sur émulateur n'ont pas été exécutés pour
+cette correction limitée au modèle Kotlin.
+
+Décisions initiales (bonus remplacé par la correction ci-dessus) : un seul Split sur deux cartes de même rang, seconde
+mise identique et solde couvrant les deux mises; un 21 en deux cartes après
+Split obtient le bonus naturel de deux fois la mise; chaque As séparé reçoit
+une seule carte, puis s'arrête; le résumé de partie vaut MIXED dès que les
+résultats des deux mains diffèrent, indépendamment du bilan des jetons.
+
+`BlackjackGame` conserve les deux `Hand` en privé. `playerHands` fournit leurs
+copies `PlayerHandState` : numéro, cartes, total, Blackjack et résultat.
+`activeHandIndex` indique la main jouée (0 puis 1). Les accesseurs historiques
+`playerCards` et `playerValue` suivent cette main, tout comme Tirer et Rester.
+Après la seconde main, le même croupier règle les deux résultats; deux mains
+déjà perdues ou naturelles n'exigent aucun tirage supplémentaire du croupier.
+Chaque résultat individuel reste WIN, LOSS ou DRAW. Les paiements par main
+sont additionnés; MIXED n'est pas un montant ni une égalité automatique.
+
+La seconde carte initiale du joueur est réaffectée à la main 2 dans
+`dealtCards`, sans changer `drawOrder`. Les nouvelles cartes portent le numéro
+de leur main, celles du croupier restent à null. Un sabot épuisé interrompt
+la partie sans paiement. Commencer une nouvelle partie efface les deux mains,
+leurs résultats et leur suivi de cartes.
+
+Cette étape implémente le modèle et ses tests, sans rendre le Split jouable
+dans Compose. Le repository rejette provisoirement un Split, car sa conversion
+est encore prévue pour une main : cette garde évite une sauvegarde partielle.
+Il reste à adapter le repository, GameUiState, GameViewModel et l'interface.
+Le libellé MIXED est traduit; le texte de l'accueil est aussi corrigé pour
+annoncer le gain de deux fois la mise. Aucun schéma Room ne change.
+
+PB-09 avance; il n'est pas déclaré terminé et le backlog Excel est inchangé.
+Les mentions antérieures d'un Split absent décrivent les étapes à leur date.
+
+Vérification : `gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+:app:assembleDebugAndroidTest` réussit. Les 99 tests unitaires passent,
+dont 77 pour BlackjackGame et 20 nouveaux scénarios du Split. Ils couvrent
+les deux tours, les résultats mixtes et leurs bilans, le bonus naturel,
+21 en trois cartes sans bonus, les As, le refus du re-Split, les cartes
+identiques de plusieurs paquets, les interruptions et la remise à zéro.
+Les tests Android compilent mais ne sont pas exécutés dans ce bloc : le
+nouveau comportement concerne le modèle Kotlin et n'est pas encore exposé
+par l'interface. La démonstration du Split sur Pixel 8 attend son intégration.
+
 Commandes : `gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 :app:assembleDebugAndroidTest`, puis `adb -s emulator-5554 shell am instrument
 -w -r -e orientation portrait
@@ -1295,3 +1535,43 @@ La préparation des parties et les tests avancent : sélection du nombre de paqu
 verrouillage pendant une partie, conservation lors de la rotation, sabot neuf au nombre
 choisi. Ces éléments peuvent être démontrés en Sprint Review. Aucun statut du backlog
 Excel changé et aucun commit/push effectué.
+
+## Statistiques par rang — 12 octobre 2026
+
+Choix A : As, 2 à 10, Valet, Dame et Roi séparés. `RankStatistics` est un
+résultat SQL, sans nouvelle table ni migration. `observeRankStatistics()`
+compte les cartes avec GROUP BY et conserve les 13 rangs avec LEFT JOIN.
+Le pourcentage utilise toutes les cartes distribuées et sauvegardées,
+joueur et croupier inclus. Sans cartes, il vaut null; un rang absent vaut
+0 % lorsqu'il existe d'autres cartes.
+
+Le Repository transmet le Flow au StatisticsViewModel. Celui-ci conserve
+le résumé et les rangs dans StatisticsUiState, attend les deux premiers
+résultats et conserve les dernières données en cas d'erreur. Compose
+affiche la section « Cartes par rang », avec ressources françaises et
+anglaises; aucun calcul statistique n'est effectué dans l'interface.
+
+Vérification : compilation des APK et 101 tests unitaires réussis.
+Sur Pixel 8, 17 tests ciblés réussis : 9 SQL, 7 ViewModel et 1 interface.
+Le test d'interface passe également en paysage. Il vérifie une sauvegarde
+réelle, un Roi à 25 % et une Dame absente à 0 %. La langue anglaise compile,
+mais n'a pas été vérifiée visuellement dans ce bloc.
+Travail concernant PB-13, PB-14 et PB-15; démontrable en Sprint Review.
+Aucun statut Excel changé, aucun commit ni push effectué dans ce bloc.
+
+## Solde global dans la TopAppBar — 12 octobre 2026
+
+Choix A : le solde apparaît sous le titre, à la même place sur tous les
+écrans. BlackjackApp observe déjà GameUiState avec collectAsStateWithLifecycle;
+la barre réutilise chips et la ressource bilingue balance_amount.
+Pendant la lecture ou après BALANCE_LOAD_FAILED, elle affiche « — » au lieu
+du solde provisoire. Aucun nouvel accès à Room ni calcul de paiement dans Compose.
+Le règlement dans le ViewModel actualise aussi la barre lors de la recomposition.
+
+Compilation application/tests réussie. Le test ciblé de navigation et paiement
+passe sur Pixel 8 en portrait (19,28 s) et en paysage (14,911 s) : solde visible
+dans chaque destination et passage de 1000 à 1010 après un naturel à mise 5.
+Une première tentative a planté avant le démarrage du test; la relance a réussi.
+Les états de chargement/erreur et l'anglais n'ont pas été testés sur l'interface
+dans ce bloc. PB-05 et PB-15 concernés; affichage démontrable en Sprint Review.
+Aucun statut Excel changé, aucun commit ni push effectué.

@@ -1,5 +1,53 @@
 # Package repository
 
+## Progression — 12 octobre 2026
+
+`saveGameProgress()` convertit un `BlackjackGame` commencé en données Room :
+phase, main active, mise, nombre de paquets, mains, distributions et sabot
+restant ordonné. Un identifiant 0 crée la sauvegarde; les appels suivants
+réutilisent l'identifiant retourné. Aucun paiement n'est effectué ici.
+
+`loadGameProgress()` retourne ces données dans `GameProgress`, ou `null`.
+Cette lecture fournit les données brutes du moteur de jeu.
+
+Depuis le 13 octobre, `restoreGameProgress()` reconstruit `Shoe` et
+`BlackjackGame`, puis retourne un `RestoredGame` avec la mise, le nombre de
+paquets, l'identifiant et la date à conserver. `null` signifie qu'aucune partie
+n'est en attente. Les noms des enums, positions, références de mains et
+totaux sont vérifiés; une erreur remonte sans effacer la sauvegarde ni payer.
+La reconstruction ne distribue aucune carte. La reprise du tour du croupier
+n'est pas automatique. Le ViewModel appelle cette fonction au démarrage.
+
+Vérification du 13 octobre : compilation et 108 tests Kotlin réussis;
+24 tests Android du repository réussis sur l'émulateur disponible
+Pixel_10_Pro (3,657 s). Les tests couvrent la réouverture puis la continuation
+et le règlement de la même partie, le Split restauré et le refus d'une phase
+inconnue sans suppression des données. Pas de nouvelle vérification UI ni
+de validation Pixel 8 dans ce bloc. PB-11 et PB-15 restent en cours.
+
+`finishGameProgress()` utilise les résultats et variations calculés par le
+modèle, puis demande au DAO de terminer la même partie et de payer une seule
+fois. L'identifiant et la date doivent rester identiques lors d'une nouvelle
+tentative. Les erreurs remontent à l'appelant; la transaction conserve la
+sauvegarde et le solde précédents.
+
+Ce nouveau chemin accepte les deux mains d'un Split. Le ViewModel utilise
+ces opérations pour la partie en cours et son règlement. Un blackjack
+immédiat utilise encore `saveFinishedGame()`, sans progression préalable.
+Une partie interrompue reçoit le statut INTERRUPTED, sans paiement, pour
+libérer la prochaine partie tout en conservant ses distributions.
+`remainingCards` est fourni explicitement : Shoe permet maintenant de lire
+et restaurer sa liste ordonnée. Sa dernière carte est la prochaine tirée.
+
+Vérification : compilation réussie, 101 tests Kotlin et 74 tests Android
+ciblés réussis sur Pixel 8 (19,317 s), dont 10 nouveaux tests dans
+`GameProgressRepositoryTest`. Ils vérifient la conversion du vrai modèle,
+la réouverture, le Split, les As séparés, les erreurs et l'absence de double
+paiement. Aucun nouveau test UI : ces opérations ne sont pas branchées aux
+écrans. PB-11 et PB-15 avancent sans être déclarés terminés.
+
+## Ancien chemin de sauvegarde finale
+
 Depuis le 12 octobre 2026, `loadBalance()` permet au ViewModel de retrouver
 le solde indépendant enregistré dans Room. `saveFinishedGame()` passe par
 la transaction du DAO qui conserve ensemble la partie et sa variation de
@@ -43,12 +91,11 @@ utilisées par cette requête.
 
 Le repository reçoit un `BlackjackDao` dans son constructeur. Il ne crée
 pas sa propre base : `BlackjackApplication` partage maintenant une base et
-un repository, fournis à la Factory des ViewModels. Leur branchement aux
-écrans reste à faire. Il prend en charge une seule
-main, comme le modèle actuel. La sauvegarde du Split reste à
-implémenter. `GameViewModel` utilise maintenant ce repository pour la
+un repository, fournis à la Factory des ViewModels. Les écrans sont branchés
+aux ViewModels. L'ancien chemin de sauvegarde prend en charge une seule
+main. `GameViewModel` utilise ce chemin pour la
 sauvegarde automatique et évite les tentatives simultanées et les doubles
-enregistrements d'une partie. Son branchement à l'interface reste à faire.
+enregistrements d'une partie.
 
 Les tests Android sont dans `BlackjackRepositoryTest.kt`. Ils utilisent
 Room et SQLite réels avec des bases isolées, sans modifier l'historique

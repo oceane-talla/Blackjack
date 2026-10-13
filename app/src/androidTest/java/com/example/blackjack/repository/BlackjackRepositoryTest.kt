@@ -86,15 +86,15 @@ class BlackjackRepositoryTest {
     }
 
     @Test
-    fun naturalBlackjackStoresTheHalfChipPaymentAndNaturalFlag() = runBlocking {
+    fun naturalBlackjackStoresTheTwoBetPaymentAndNaturalFlag() = runBlocking {
         val game = gameWith(Rank.ACE, Rank.TEN, Rank.KING, Rank.NINE)
         game.startRound()
 
         val gameId = repository.saveFinishedGame(game, bet = 5, playedAt = 1_000)
 
-        assertEquals(listOf(GameEntity(gameId, 1_000, 5, 5, "WIN", 7.5, 19)),
+        assertEquals(listOf(GameEntity(gameId, 1_000, 5, 5, "WIN", 10.0, 19)),
             repository.observeHistory().first())
-        assertEquals(listOf(HandEntity(gameId, 1, 5, 21, "WIN", true, 7.5)),
+        assertEquals(listOf(HandEntity(gameId, 1, 5, 21, "WIN", true, 10.0)),
             repository.getHands(gameId))
         assertEquals(4, repository.getDrawnCards(gameId).size)
     }
@@ -130,7 +130,7 @@ class BlackjackRepositoryTest {
             val id = repository.saveFinishedGame(game, bet = 10)
             val savedGame = repository.observeHistory().first().first { it.id == id }
             assertEquals("LOSS", savedGame.result)
-            assertEquals(-10.0, savedGame.chipChange, 0.0)
+            assertEquals(-10.0, savedGame.chipChange!!, 0.0)
             assertEquals(listOf(HandEntity(id, 1, 10, expectedTotal, "LOSS", false, -10.0)),
                 repository.getHands(id))
         }
@@ -148,10 +148,10 @@ class BlackjackRepositoryTest {
             val id = repository.saveFinishedGame(game, bet = 10)
             val savedGame = repository.observeHistory().first().first { it.id == id }
             assertEquals("DRAW", savedGame.result)
-            assertEquals(0.0, savedGame.chipChange, 0.0)
+            assertEquals(0.0, savedGame.chipChange!!, 0.0)
             val hand = repository.getHands(id).single()
             assertEquals("DRAW", hand.result)
-            assertEquals(0.0, hand.chipChange, 0.0)
+            assertEquals(0.0, hand.chipChange!!, 0.0)
             assertEquals(natural, hand.isNaturalBlackjack)
         }
     }
@@ -208,7 +208,7 @@ class BlackjackRepositoryTest {
             val id = repository.saveFinishedGame(game, bet = 5, playedAt = 1_000)
             val history = emissions.await()
             assertTrue(history.first().isEmpty())
-            assertEquals(listOf(GameEntity(id, 1_000, 5, 5, "WIN", 7.5, 19)), history.last())
+            assertEquals(listOf(GameEntity(id, 1_000, 5, 5, "WIN", 10.0, 19)), history.last())
             assertEquals(1, repository.getHands(id).size)
             assertEquals(4, repository.getDrawnCards(id).size)
         }
@@ -243,7 +243,7 @@ class BlackjackRepositoryTest {
 
         assertTrue(firstId != secondId)
         assertEquals(firstCards, repository.getDrawnCards(firstId))
-        assertEquals(listOf(HandEntity(firstId, 1, 5, 21, "WIN", true, 7.5)),
+        assertEquals(listOf(HandEntity(firstId, 1, 5, 21, "WIN", true, 10.0)),
             repository.getHands(firstId))
         assertEquals(listOf(HandEntity(secondId, 1, 10, 18, "DRAW", false, 0.0)),
             repository.getHands(secondId))
@@ -267,9 +267,9 @@ class BlackjackRepositoryTest {
         database = openFileDatabase()
         repository = BlackjackRepository(database.blackjackDao())
 
-        assertEquals(listOf(GameEntity(id, 1_000, 5, 5, "WIN", 7.5, 19)),
+        assertEquals(listOf(GameEntity(id, 1_000, 5, 5, "WIN", 10.0, 19)),
             repository.observeHistory().first())
-        assertEquals(listOf(HandEntity(id, 1, 5, 21, "WIN", true, 7.5)), repository.getHands(id))
+        assertEquals(listOf(HandEntity(id, 1, 5, 21, "WIN", true, 10.0)), repository.getHands(id))
         assertEquals(cards, repository.getDrawnCards(id))
     }
 

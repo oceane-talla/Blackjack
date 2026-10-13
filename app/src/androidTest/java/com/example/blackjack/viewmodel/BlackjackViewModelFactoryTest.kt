@@ -137,7 +137,7 @@ class BlackjackViewModelFactoryTest {
         }
         assertEquals(id, historyState.games.single().id)
         assertEquals(7, historyState.games.single().initialBet)
-        assertEquals(10.5, statisticsState.statistics.totalGains, 0.0)
+        assertEquals(14.0, statisticsState.statistics.totalGains, 0.0)
     }
 
     private fun newProvider(): ViewModelProvider {

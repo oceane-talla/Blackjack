@@ -10,6 +10,10 @@ import com.example.blackjack.database.dao.BlackjackDao
 import com.example.blackjack.database.entity.GameEntity
 import com.example.blackjack.repository.BlackjackRepository
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
@@ -105,6 +109,47 @@ class HistoryViewModelTest {
         val state = withTimeout(5_000) { viewModel.uiState.first { it.hasError } }
         assertEquals(lastGames, state.games)
         assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun observationStartsWithASubscriberAndStopsAfterTheTimeout() = runBlocking {
+        val started = CompletableDeferred<Unit>()
+        val stopped = CompletableDeferred<Unit>()
+        val dao = object : BlackjackDao by database.blackjackDao() {
+            override fun observeHistory(): Flow<List<GameEntity>> = flow {
+                started.complete(Unit)
+                try {
+                    emit(emptyList())
+                    awaitCancellation()
+                } finally {
+                    stopped.complete(Unit)
+                }
+            }
+        }
+        val viewModel = createViewModel(dao)
+        assertFalse(started.isCompleted)
+        // Lire value ne crée pas d'abonnement; collect représente l'écran actif.
+        assertTrue(viewModel.uiState.value.isLoading)
+        val subscriber = launch { viewModel.uiState.collect() }
+        withTimeout(5_000) { started.await() }
+        withTimeout(5_000) { viewModel.uiState.first { !it.isLoading } }
+        subscriber.cancel()
+        subscriber.join()
+        delay(1_000)
+        assertFalse(stopped.isCompleted)
+        withTimeout(7_000) { stopped.await() }
+        assertFalse(viewModel.uiState.value.isLoading)
+    }
+
+    @Test
+    fun resubscribingReadsGamesSavedWhileObservationWasStopped() = runBlocking {
+        val dao = database.blackjackDao()
+        val viewModel = createViewModel(dao)
+        withTimeout(5_000) { viewModel.uiState.first { !it.isLoading } }
+        delay(6_000)
+        val id = dao.insertGame(game(500))
+        val state = withTimeout(5_000) { viewModel.uiState.first { it.games.isNotEmpty() } }
+        assertEquals(id, state.games.single().id)
     }
 
     private fun createViewModel(dao: BlackjackDao): HistoryViewModel {

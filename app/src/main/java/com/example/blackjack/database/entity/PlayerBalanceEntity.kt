@@ -7,6 +7,6 @@ import androidx.room3.PrimaryKey
 @Entity(tableName = "player_balance")
 data class PlayerBalanceEntity(
     @PrimaryKey val id: Int = 1,
-    // Double conserve les demi-jetons du paiement d'un Blackjack naturel.
+    // Conserve le type existant et les éventuels demi-jetons des anciennes parties.
     val chips: Double = 1_000.0
 )

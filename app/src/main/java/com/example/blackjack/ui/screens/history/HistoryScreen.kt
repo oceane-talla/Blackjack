@@ -33,7 +33,7 @@ fun HistoryScreen(state: HistoryUiState, modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.titleMedium)
                 Text(stringResource(resultLabel(game.result)), color = MaterialTheme.colorScheme.primary)
                 ValueRow(stringResource(R.string.bet), game.totalBet.toString())
-                ValueRow(stringResource(R.string.net_change_label), chipText(game.chipChange))
+                ValueRow(stringResource(R.string.net_change_label), game.chipChange?.let(::chipText) ?: "—")
                 ValueRow(stringResource(R.string.dealer), game.dealerTotal.toString())
             }
         }

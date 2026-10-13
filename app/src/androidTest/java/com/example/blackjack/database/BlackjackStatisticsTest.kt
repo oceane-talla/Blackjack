@@ -9,6 +9,7 @@ import com.example.blackjack.database.entity.DrawnCardEntity
 import com.example.blackjack.database.entity.GameEntity
 import com.example.blackjack.database.entity.HandEntity
 import com.example.blackjack.model.GameStatistics
+import com.example.blackjack.model.Rank
 import com.example.blackjack.repository.BlackjackRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -166,6 +167,57 @@ class BlackjackStatisticsTest {
             assertEquals(1L, states.last().totalHands)
             assertEquals(1L, states.last().totalCards)
             assertEquals(100.0, states.last().redPercentage!!, 0.0)
+        }
+    }
+
+    @Test
+    fun emptyDatabaseReturnsEveryRankWithZeroCountAndUndefinedPercentage() = runBlocking {
+        val statistics = dao.observeRankStatistics().first()
+        assertEquals(Rank.entries.map { it.name }, statistics.map { it.rank })
+        statistics.forEach {
+            assertEquals(0L, it.cardCount)
+            assertNull(it.percentage)
+        }
+    }
+
+    @Test
+    fun ranksKeepFiguresSeparateAndCountBothPlayerAndDealerAcrossGames() = runBlocking {
+        val ranks = listOf("ACE", "TEN", "JACK", "QUEEN", "KING", "ACE")
+        val firstCards = cards(*Array(ranks.size) { "HEARTS" })
+            .mapIndexed { index, card -> card.copy(rank = ranks[index]) }
+        dao.insertGameWithDetails(game(), listOf(hand()), firstCards)
+        dao.insertGameWithDetails(game(), listOf(hand()), cards("SPADES"))
+
+        val statistics = dao.observeRankStatistics().first()
+        val byRank = statistics.associateBy { it.rank }
+        assertEquals(13, statistics.size)
+        assertEquals(7L, statistics.sumOf { it.cardCount })
+        assertEquals(2L, byRank.getValue("ACE").cardCount)
+        assertEquals(2L, byRank.getValue("TEN").cardCount)
+        listOf("JACK", "QUEEN", "KING").forEach {
+            assertEquals(1L, byRank.getValue(it).cardCount)
+            assertEquals(100.0 / 7, byRank.getValue(it).percentage!!, 0.000001)
+        }
+        assertEquals(200.0 / 7, byRank.getValue("ACE").percentage!!, 0.000001)
+        assertEquals(0L, byRank.getValue("TWO").cardCount)
+        assertEquals(0.0, byRank.getValue("TWO").percentage!!, 0.0)
+        assertEquals(100.0, statistics.sumOf { it.percentage!! }, 0.000001)
+    }
+
+    @Test
+    fun rankStatisticsFlowUpdatesAfterCardsAreSaved() = runBlocking {
+        withTimeout(10_000) {
+            val initial = CompletableDeferred<Unit>()
+            val emissions = async {
+                dao.observeRankStatistics().onEach { initial.complete(Unit) }.take(2).toList()
+            }
+            initial.await()
+            dao.insertGameWithDetails(game(), listOf(hand()), cards("CLUBS"))
+            val states = emissions.await()
+            assertEquals(0L, states.first().sumOf { it.cardCount })
+            val ten = states.last().single { it.rank == "TEN" }
+            assertEquals(1L, ten.cardCount)
+            assertEquals(100.0, ten.percentage!!, 0.0)
         }
     }
 

@@ -31,6 +31,7 @@ fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount:
             Text(stringResource(R.string.balance_load_failed), color = MaterialTheme.colorScheme.error)
             Button(onClick = onRetryBalanceLoad) { Text(stringResource(R.string.retry_balance_load)) }
         } else CasinoPanel {
+            val maxAffordableBet = state.chips.toInt().coerceIn(0, 100)
             ValueRow(stringResource(R.string.balance), chipText(state.chips))
             ValueRow(stringResource(R.string.bet), state.selectedBet.toString())
             ValueRow(stringResource(R.string.deck_count), state.selectedDeckCount.toString())
@@ -54,17 +55,29 @@ fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount:
                     val amounts = listOf(1, 5, 10, 25, 50, 100)
                     val colors = listOf(0xFF53666D, 0xFFAD3441, 0xFF255F9C, 0xFF257044, 0xFF704391, 0xFF272D32)
                     amounts.forEachIndexed { index, amount ->
-                        Surface(onClick = { onSelectBet(amount) }, shape = CircleShape,
+                        val isAffordable = amount <= state.chips
+                        Surface(onClick = { onSelectBet(amount) }, enabled = isAffordable, shape = CircleShape,
                             modifier = Modifier.size(58.dp).testTag("chip_$amount"),
-                            color = Color(colors[index]), contentColor = Color.White,
-                            border = BorderStroke(if (state.selectedBet == amount) 3.dp else 1.dp,
-                                if (state.selectedBet == amount) MaterialTheme.colorScheme.primary else Color.White)) {
+                            color = Color(colors[index]).copy(alpha = if (isAffordable) 1f else 0.38f),
+                            contentColor = Color.White.copy(alpha = if (isAffordable) 1f else 0.55f),
+                            border = BorderStroke(
+                                if (state.selectedBet == amount && isAffordable) 3.dp else 1.dp,
+                                if (state.selectedBet == amount && isAffordable) MaterialTheme.colorScheme.primary
+                                else Color.White.copy(alpha = if (isAffordable) 1f else 0.55f)
+                            )) {
                             Box(contentAlignment = androidx.compose.ui.Alignment.Center) { Text(amount.toString()) }
                         }
                     }
                 }
-                Slider(value = state.selectedBet.toFloat(), onValueChange = { onSelectBet(it.roundToInt()) },
-                    valueRange = 1f..100f, steps = 98, modifier = Modifier.testTag("bet_slider"))
+                if (maxAffordableBet >= 2) {
+                    Slider(
+                        value = state.selectedBet.coerceIn(1, maxAffordableBet).toFloat(),
+                        onValueChange = { onSelectBet(it.roundToInt()) },
+                        valueRange = 1f..maxAffordableBet.toFloat(),
+                        steps = (maxAffordableBet - 2).coerceAtLeast(0),
+                        modifier = Modifier.testTag("bet_slider")
+                    )
+                }
                 Text(stringResource(R.string.bet_range), style = MaterialTheme.typography.bodySmall)
                 if (state.error == GameError.BET_NOT_ALLOWED) Text(stringResource(R.string.invalid_bet), color = MaterialTheme.colorScheme.error)
                 if (state.error == GameError.ROUND_INTERRUPTED) Text(stringResource(R.string.interrupted_round))
