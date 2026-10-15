@@ -1,12 +1,15 @@
 package com.example.blackjack.ui.screens.bet
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -57,7 +60,7 @@ fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount:
                     amounts.forEachIndexed { index, amount ->
                         val isAffordable = amount <= state.chips
                         Surface(onClick = { onSelectBet(amount) }, enabled = isAffordable, shape = CircleShape,
-                            modifier = Modifier.size(58.dp).testTag("chip_$amount"),
+                            modifier = Modifier.size(68.dp).testTag("chip_$amount"),
                             color = Color(colors[index]).copy(alpha = if (isAffordable) 1f else 0.38f),
                             contentColor = Color.White.copy(alpha = if (isAffordable) 1f else 0.55f),
                             border = BorderStroke(
@@ -65,7 +68,12 @@ fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount:
                                 if (state.selectedBet == amount && isAffordable) MaterialTheme.colorScheme.primary
                                 else Color.White.copy(alpha = if (isAffordable) 1f else 0.55f)
                             )) {
-                            Box(contentAlignment = androidx.compose.ui.Alignment.Center) { Text(amount.toString()) }
+                            BettingChipFace(
+                                amount = amount,
+                                baseColor = Color(colors[index]),
+                                selected = state.selectedBet == amount && isAffordable,
+                                enabled = isAffordable
+                            )
                         }
                     }
                 }
@@ -90,5 +98,47 @@ fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount:
                 Button(onClick = onResume) { Text(stringResource(R.string.resume_game)) }
             }
         }
+    }
+}
+
+@Composable
+private fun BettingChipFace(amount: Int, baseColor: Color, selected: Boolean, enabled: Boolean) {
+    val opacity = if (enabled) 1f else 0.45f
+    Box(contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize().padding(3.dp)) {
+            val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+            val radius = size.minDimension / 2f
+            val rimColor = baseColor.copy(alpha = opacity)
+
+            drawCircle(color = Color(0xFF17221F).copy(alpha = opacity), radius = radius)
+            drawCircle(color = rimColor, radius = radius * 0.91f)
+
+            // Les petits segments clairs donnent au jeton un motif de couronne vu de dessus.
+            repeat(12) { segment ->
+                drawArc(
+                    color = Color.White.copy(alpha = opacity),
+                    startAngle = segment * 30f + 3f,
+                    sweepAngle = 13f,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.82f, center.y - radius * 0.82f),
+                    size = androidx.compose.ui.geometry.Size(radius * 1.64f, radius * 1.64f),
+                    style = Stroke(width = radius * 0.18f)
+                )
+            }
+            drawCircle(
+                color = if (amount == 1 || amount == 50) Color(0xFFF7F1DC) else Color(0xFF17221F),
+                radius = radius * 0.62f
+            )
+            drawCircle(
+                color = if (selected) Color(0xFFE5C76B) else Color.White.copy(alpha = 0.8f),
+                radius = radius * 0.62f,
+                style = Stroke(width = radius * 0.045f)
+            )
+        }
+        Text(
+            text = amount.toString(),
+            color = if (amount == 1 || amount == 50) Color(0xFF17221F) else Color.White,
+            style = MaterialTheme.typography.labelLarge
+        )
     }
 }

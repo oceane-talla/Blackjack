@@ -40,7 +40,7 @@ import com.example.blackjack.ui.navigation.BlackjackNavHost
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewModel, statisticsViewModel: StatisticsViewModel) {
-    // Le FAB et les écrans Mise/Partie lisent le même état et le même ViewModel.
+    // Le FAB d'accueil suit le même état de partie que les écrans Mise et Partie.
     val gameState by gameViewModel.uiState.collectAsStateWithLifecycle()
     val resumeRound = gameState.roundBet != null && !gameState.canChangeBet
     val navController = rememberNavController()
@@ -59,40 +59,18 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
             launchSingleTop = true
         }
     }
-    val fabLabel = when (currentRoute) {
-        BlackjackDestination.BET -> if (resumeRound) R.string.resume_game else R.string.open_table
-        BlackjackDestination.GAME -> when {
-            gameState.canHit -> R.string.hit
-            gameState.canChangeBet -> R.string.new_game
-            else -> R.string.hit
-        }
-        else -> if (resumeRound) R.string.resume_game else R.string.new_game
+    val fabLabel = when {
+        gameState.isLoadingBalance -> R.string.loading_balance
+        resumeRound -> R.string.resume_game
+        else -> R.string.new_game
     }
-    val fabEnabled = when (currentRoute) {
-        BlackjackDestination.BET -> gameState.canStartGame || resumeRound
-        BlackjackDestination.GAME -> gameState.canHit || gameState.canChangeBet
-        else -> true
-    }
-    val onFabClick: () -> Unit = when (currentRoute) {
-        BlackjackDestination.BET -> if (resumeRound) {
-            { navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true } }
-        } else {
-            {
-                if (gameViewModel.startGame()) {
-                    navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true }
-                }
-            }
-        }
-        BlackjackDestination.GAME -> when {
-            gameState.canHit -> ({ gameViewModel.hit() })
-            gameState.canChangeBet -> ({ openBetScreen() })
-            else -> ({ })
-        }
-        else -> if (resumeRound) {
-            { navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true } }
-        } else {
-            { openBetScreen() }
-        }
+    val fabEnabled = !gameState.isLoadingBalance &&
+        gameState.error != GameError.BALANCE_LOAD_FAILED &&
+        (resumeRound || gameState.canStartGame)
+    val onFabClick: () -> Unit = if (resumeRound) {
+        { navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true } }
+    } else {
+        { openBetScreen() }
     }
     val tabRoutes = listOf(
         BlackjackDestination.HOME,
@@ -147,14 +125,26 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
                         modifier = Modifier.testTag("navigation_$route"),
                         selected = selectedTab == route,
                         onClick = {
-                            navController.navigate(route) {
-                                // On évite d'empiler les onglets; leur parcours est conservé.
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            val movingBetweenReports =
+                                currentRoute in listOf(
+                                    BlackjackDestination.HISTORY,
+                                    BlackjackDestination.STATISTICS
+                                ) && route in listOf(
+                                    BlackjackDestination.HISTORY,
+                                    BlackjackDestination.STATISTICS
+                                )
+                            if (movingBetweenReports) {
+                                // Depuis Statistiques, Retour doit retrouver Historique, et inversement.
+                                navController.navigate(route) { launchSingleTop = true }
+                            } else {
+                                navController.navigate(route) {
+                                    // Les autres onglets conservent leur pile, dont la partie en cours.
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = route != BlackjackDestination.HOME
                                 }
-                                launchSingleTop = true
-                                // Accueil reste la racine, sans restaurer le parcours de Jouer.
-                                restoreState = route != BlackjackDestination.HOME
                             }
                         },
                         icon = {
@@ -176,20 +166,22 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
             }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                modifier = Modifier.testTag("new_game_fab").then(
-                    if (fabEnabled) Modifier else Modifier.semantics { disabled() }
-                ),
-                onClick = if (fabEnabled) onFabClick else ({ }),
-                containerColor = if (fabEnabled) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                contentColor = if (fabEnabled) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                icon = {
-                    Icon(painterResource(R.drawable.ic_add), contentDescription = null)
-                },
-                text = { Text(stringResource(fabLabel)) }
-            )
+            if (currentRoute == BlackjackDestination.HOME) {
+                ExtendedFloatingActionButton(
+                    modifier = Modifier.testTag("new_game_fab").then(
+                        if (fabEnabled) Modifier else Modifier.semantics { disabled() }
+                    ),
+                    onClick = if (fabEnabled) onFabClick else ({ }),
+                    containerColor = if (fabEnabled) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                    contentColor = if (fabEnabled) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                    icon = {
+                        Icon(painterResource(R.drawable.ic_add), contentDescription = null)
+                    },
+                    text = { Text(stringResource(fabLabel)) }
+                )
+            }
         }
     ) { innerPadding ->
         BlackjackNavHost(
@@ -198,8 +190,7 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
             gameViewModel = gameViewModel,
             historyViewModel = historyViewModel,
             statisticsViewModel = statisticsViewModel,
-            // Le FAB garde sa zone : aucun bouton défilant ne peut être caché dessous.
-            modifier = Modifier.padding(innerPadding).padding(bottom = 80.dp)
+            modifier = Modifier.padding(innerPadding)
         )
     }
 }

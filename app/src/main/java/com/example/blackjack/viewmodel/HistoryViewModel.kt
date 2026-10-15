@@ -7,9 +7,9 @@ import com.example.blackjack.repository.BlackjackRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 // Observe les parties sauvegardées en passant uniquement par le repository.
@@ -18,10 +18,13 @@ class HistoryViewModel(private val repository: BlackjackRepository) : ViewModel(
         // Propre à chaque reprise de l'observation; conserve la liste en cas d'erreur.
         var lastState = HistoryUiState()
         emitAll(
-            repository.observeHistory()
-                // map transforme chaque liste de Room en données pour l'écran.
-                .map { games ->
-                    lastState = HistoryUiState(games = games, isLoading = false)
+            combine(repository.observeHistory(), repository.observeFinishedHands()) { games, hands ->
+                    // Les deux lectures Room deviennent un seul état prêt à afficher.
+                    lastState = HistoryUiState(
+                        games = games,
+                        handsByGame = hands.groupBy { it.gameId },
+                        isLoading = false
+                    )
                     lastState
                 }
                 // catch laisse passer l'annulation et publie une erreur de lecture.

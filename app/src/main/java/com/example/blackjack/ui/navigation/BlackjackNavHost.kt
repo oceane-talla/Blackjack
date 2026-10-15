@@ -54,6 +54,7 @@ fun BlackjackNavHost(
                 onStand = { gameViewModel.stand() },
                 onSplit = { gameViewModel.split() },
                 onRetrySave = { gameViewModel.retrySave() },
+                onReplaySameBet = { gameViewModel.startGame() },
                 onNewGame = {
                     navController.clearBackStack(BlackjackDestination.BET)
                     navController.navigate(BlackjackDestination.BET) {

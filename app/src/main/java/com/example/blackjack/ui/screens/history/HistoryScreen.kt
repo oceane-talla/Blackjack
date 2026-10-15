@@ -35,6 +35,28 @@ fun HistoryScreen(state: HistoryUiState, modifier: Modifier = Modifier) {
                 ValueRow(stringResource(R.string.bet), game.totalBet.toString())
                 ValueRow(stringResource(R.string.net_change_label), game.chipChange?.let(::chipText) ?: "—")
                 ValueRow(stringResource(R.string.dealer), game.dealerTotal.toString())
+
+                val hands = state.handsByGame[game.id].orEmpty()
+                if (hands.size > 1) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+                    Text(
+                        stringResource(R.string.split_details),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    hands.forEach { hand ->
+                        Text(
+                            stringResource(R.string.split_hand_title, hand.handNumber),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        ValueRow(stringResource(R.string.hand_result), stringResource(resultLabel(hand.result)))
+                        ValueRow(stringResource(R.string.bet), hand.bet.toString())
+                        ValueRow(
+                            stringResource(R.string.net_change_label),
+                            hand.chipChange?.let(::chipText) ?: "—"
+                        )
+                    }
+                }
             }
         }
     }

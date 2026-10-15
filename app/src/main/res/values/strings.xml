@@ -14,6 +14,7 @@
     <string name="bet_description">Choisissez votre mise et de 1 à 8 paquets. Le sabot est renouvelé si moins de 4 cartes restent ou si le nombre de paquets change.</string>
     <string name="open_table">Distribuer les cartes</string>
     <string name="game_title">La table</string>
+    <string name="discard_title">Défausse</string>
     <string name="game_description">Approchez de 21 sans le dépasser. Le croupier reste à 17 ou plus.</string>
     <string name="dealer">Croupier</string>
     <string name="player">Joueur</string>
@@ -50,6 +51,9 @@
     <string name="interrupted_round">Le sabot est épuisé. La partie est interrompue, sans règlement des jetons.</string>
     <string name="read_failed">Impossible de lire les données. Les dernières données reçues restent affichées.</string>
     <string name="empty_history">Aucune partie enregistrée. Jouez une première partie !</string>
+    <string name="split_details">Détail du Split</string>
+    <string name="split_hand_title">Main %1$d</string>
+    <string name="hand_result">Résultat de la main</string>
     <string name="hidden_card">Carte face cachée</string>
     <string name="card_description">%1$s, %2$s</string>
     <string name="suit_hearts">Cœurs</string>

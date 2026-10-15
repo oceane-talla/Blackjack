@@ -192,6 +192,9 @@ interface BlackjackDao {
     @Query("SELECT * FROM games WHERE status = 'FINISHED' ORDER BY playedAt DESC, id DESC")
     fun observeHistory(): Flow<List<GameEntity>>
 
+    @Query("SELECT * FROM hands WHERE gameId IN (SELECT id FROM games WHERE status = 'FINISHED') ORDER BY gameId DESC, handNumber ASC")
+    fun observeFinishedHands(): Flow<List<HandEntity>>
+
     // Chaque sous-requête produit un seul résumé : CROSS JOIN assemble ces trois résumés.
     // Joindre directement les parties, mains et cartes multiplierait les mises et les gains.
     // COUNT compte, SUM additionne, AVG calcule la moyenne et MAX cherche la plus grande valeur.

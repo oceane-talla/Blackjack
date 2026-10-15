@@ -195,6 +195,9 @@ class BlackjackRepository(private val dao: BlackjackDao) {
 
     fun observeHistory(): Flow<List<GameEntity>> = dao.observeHistory()
 
+    // Les détails des mains terminées restent observables après chaque règlement.
+    fun observeFinishedHands(): Flow<List<HandEntity>> = dao.observeFinishedHands()
+
     // Transmet les calculs SQL au ViewModel, sans recompter l'historique en Kotlin.
     fun observeStatistics(): Flow<GameStatistics> = dao.observeStatistics()
 

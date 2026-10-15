@@ -14,6 +14,7 @@
     <string name="bet_description">Choose your bet and 1 to 8 decks. The shoe is renewed when fewer than 4 cards remain or the deck count changes.</string>
     <string name="open_table">Deal cards</string>
     <string name="game_title">The table</string>
+    <string name="discard_title">Discard pile</string>
     <string name="game_description">Get close to 21 without going over. The dealer stands on 17 or more.</string>
     <string name="dealer">Dealer</string>
     <string name="player">Player</string>
@@ -50,6 +51,9 @@
     <string name="interrupted_round">The shoe is empty. The round was interrupted without settling chips.</string>
     <string name="read_failed">Unable to read data. The last received data remains visible.</string>
     <string name="empty_history">No saved games. Play your first round!</string>
+    <string name="split_details">Split details</string>
+    <string name="split_hand_title">Hand %1$d</string>
+    <string name="hand_result">Hand result</string>
     <string name="hidden_card">Face-down card</string>
     <string name="card_description">%1$s, %2$s</string>
     <string name="suit_hearts">Hearts</string>
