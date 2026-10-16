@@ -5,7 +5,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -23,7 +22,6 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.blackjack.R
@@ -32,12 +30,28 @@ import com.example.blackjack.model.GamePhase
 import com.example.blackjack.ui.components.*
 import com.example.blackjack.viewmodel.GameUiState
 import com.example.blackjack.viewmodel.GameError
+import kotlinx.coroutines.delay
 
 @Composable
 fun GameScreen(state: GameUiState, onHit: () -> Unit, onStand: () -> Unit, onSplit: () -> Unit,
     onRetrySave: () -> Unit, onNewGame: () -> Unit, onReplaySameBet: () -> Unit,
     modifier: Modifier = Modifier) {
     var shoePosition by remember { mutableStateOf<Offset?>(null) }
+    var discardPosition by remember { mutableStateOf<Offset?>(null) }
+    val isFinished = state.phase == GamePhase.FINISHED && state.result != null
+    var collected by rememberSaveable(state.roundId) { mutableStateOf(false) }
+    val collection = remember(state.roundId) { Animatable(if (collected) 1f else 0f) }
+    LaunchedEffect(state.roundId, isFinished, discardPosition != null) {
+        if (isFinished && !collected && discardPosition != null) {
+            // Laisser lire la dernière carte avant de ramasser les mains.
+            delay(900)
+            collection.animateTo(1f, tween(700))
+            collected = true
+        }
+    }
+    val cardsOnTable = state.dealerCards.size + state.playerHands.sumOf { it.cards.size }
+    val visibleDiscardCount = (state.discardedCardCount -
+        if (isFinished && !collected) cardsOnTable else 0).coerceAtLeast(0)
     Column(modifier.fillMaxSize().background(Brush.verticalGradient(listOf(
         Color(0xFF062C21), Color(0xFF17613A), Color(0xFF0A3E29)
     ))).border(2.dp, Color(0xFFBDA06A), RoundedCornerShape(24.dp))
@@ -50,21 +64,26 @@ fun GameScreen(state: GameUiState, onHit: () -> Unit, onStand: () -> Unit, onSpl
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically) {
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text("BLACKJACK", color = Color(0xFFE2C584), style = MaterialTheme.typography.headlineMedium)
                 Text(stringResource(R.string.game_title), style = MaterialTheme.typography.labelLarge)
             }
-            // Le point de départ est mesuré : il reste juste en portrait et en paysage.
-            Box(Modifier.clearAndSetSemantics { }.background(Color(0xFF493220), RoundedCornerShape(10.dp))
-                .border(2.dp, Color(0xFFBDA06A), RoundedCornerShape(10.dp)).padding(8.dp)) {
-                PlayingCard(null, Modifier.size(48.dp, 68.dp).onGloballyPositioned {
-                    shoePosition = it.positionInRoot()
-                })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                // Le point de départ est mesuré : il reste juste en portrait et en paysage.
+                Box(Modifier.clearAndSetSemantics { }.background(Color(0xFF493220), RoundedCornerShape(10.dp))
+                    .border(2.dp, Color(0xFFBDA06A), RoundedCornerShape(10.dp)).padding(8.dp)) {
+                    PlayingCard(null, Modifier.size(48.dp, 68.dp).onGloballyPositioned {
+                        shoePosition = it.positionInRoot()
+                    })
+                }
+                DiscardPile(visibleDiscardCount) { discardPosition = it }
             }
         }
-        val isFinished = state.phase == GamePhase.FINISHED && state.result != null
-        if (!isFinished) {
+        key(state.roundId) {
+        if (!collected) {
             HandPanel(stringResource(R.string.dealer), state.dealerCards, state.dealerTotal,
+                discardPosition = discardPosition, collectionProgress = collection.value,
                 shoePosition = shoePosition, dealer = true)
             state.playerHands.forEach { hand ->
                 val handLabel = when {
@@ -79,11 +98,13 @@ fun GameScreen(state: GameUiState, onHit: () -> Unit, onStand: () -> Unit, onSpl
                     total = hand.total,
                     result = hand.result?.name,
                     shoePosition = shoePosition,
+                    discardPosition = discardPosition, collectionProgress = collection.value,
                     active = hand.handNumber - 1 == state.activeHandIndex && state.phase == GamePhase.PLAYER_TURN,
                     split = state.playerHands.size > 1,
                     modifier = Modifier.testTag("player_hand_${hand.handNumber}")
                 )
             }
+        }
         }
         if (state.playerHasBlackjack) Text(stringResource(R.string.natural_blackjack), color = MaterialTheme.colorScheme.primary)
         if (state.canSplit) {
@@ -105,6 +126,7 @@ fun GameScreen(state: GameUiState, onHit: () -> Unit, onStand: () -> Unit, onSpl
                 if (state.savedGameId != null && state.canStartGame) {
                     Button(
                         onClick = onReplaySameBet,
+                        enabled = collected,
                         modifier = Modifier.fillMaxWidth().testTag("replay_same_bet_button")
                     ) {
                         Text("${stringResource(R.string.new_game)} (${stringResource(
@@ -127,46 +149,34 @@ fun GameScreen(state: GameUiState, onHit: () -> Unit, onStand: () -> Unit, onSpl
                 Text(stringResource(R.string.stand))
             }
         }
-        if (state.canChangeBet) OutlinedButton(onClick = onNewGame, modifier = Modifier.testTag("change_bet_button")) {
+        if (state.canChangeBet) OutlinedButton(onClick = onNewGame,
+            enabled = !isFinished || collected, modifier = Modifier.testTag("change_bet_button")) {
             Text(stringResource(R.string.change_bet))
-        }
-        if (isFinished) {
-            val discardCards = state.dealerCards.filterNotNull() + state.playerHands.flatMap { it.cards }
-            DiscardTray(discardCards)
         }
     }
 }
 
 @Composable
-private fun DiscardTray(cards: List<Card>) {
-    CasinoPanel(Modifier.testTag("discard_tray")) {
-        Text(stringResource(R.string.discard_title), style = MaterialTheme.typography.titleMedium,
-            color = Color(0xFFE2C584))
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val startOffset = with(LocalDensity.current) { (-78).dp.toPx() }
-            cards.forEachIndexed { index, card ->
-                key(index, card.rank, card.suit) {
-                    val verticalOffset = remember(startOffset) { Animatable(startOffset) }
-                    LaunchedEffect(Unit) {
-                        verticalOffset.animateTo(
-                            targetValue = 0f,
-                            animationSpec = tween(durationMillis = 380, delayMillis = index * 55)
-                        )
-                    }
-                    PlayingCard(card, Modifier.size(54.dp, 78.dp)
-                        .graphicsLayer { translationY = verticalOffset.value })
-                }
+private fun DiscardPile(cardCount: Int, onPosition: (Offset) -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier.testTag("discard_pile")) {
+        Box(Modifier.size(60.dp, 80.dp).onGloballyPositioned { onPosition(it.positionInRoot()) }) {
+            // Une épaisseur progressive, plafonnée pour garder la pile dans son emplacement.
+            val layers = if (cardCount == 0) 0 else (1 + cardCount / 4).coerceAtMost(12)
+            repeat(layers) { index ->
+                PlayingCard(null, Modifier.offset(x = index.dp, y = index.dp)
+                    .size(48.dp, 68.dp))
             }
         }
+        Text(stringResource(R.string.discard_title), style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFE2C584))
     }
 }
 
 @Composable
 private fun HandPanel(label: String, cards: List<Card?>, total: Int?, result: String? = null,
+    discardPosition: Offset? = null, collectionProgress: Float = 0f,
     shoePosition: Offset? = null, dealer: Boolean = false, active: Boolean = false, split: Boolean = false,
     modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()
@@ -180,6 +190,7 @@ private fun HandPanel(label: String, cards: List<Card?>, total: Int?, result: St
             val start = (maxWidth - 78.dp - step * (cards.size - 1).coerceAtLeast(0)) / 2
             cards.forEachIndexed { index, card ->
                 DealtPlayingCard(card, shoePosition,
+                    discardPosition = discardPosition, collectionProgress = collectionProgress,
                     delayMillis = if (index < 2 && !split) (index * 2 + if (dealer) 1 else 0) * 160 else 0,
                     animate = !(split && index == 0),
                     modifier = Modifier.offset(x = start + step * index).zIndex(index.toFloat()))
@@ -191,6 +202,7 @@ private fun HandPanel(label: String, cards: List<Card?>, total: Int?, result: St
 
 @Composable
 private fun DealtPlayingCard(card: Card?, shoePosition: Offset?, delayMillis: Int,
+    discardPosition: Offset?, collectionProgress: Float,
     animate: Boolean, modifier: Modifier = Modifier) {
     var destination by remember { mutableStateOf<Offset?>(null) }
     var delivered by rememberSaveable { mutableStateOf(!animate) }
@@ -213,6 +225,12 @@ private fun DealtPlayingCard(card: Card?, shoePosition: Offset?, delayMillis: In
             scaleX = 1f - 0.38f * remaining
             scaleY = scaleX
             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+            if (collectionProgress > 0f && discardPosition != null && target != null) {
+                translationX = (discardPosition.x - target.x) * collectionProgress
+                translationY = (discardPosition.y - target.y) * collectionProgress
+                scaleX = 1f - (1f - 48f / 78f) * collectionProgress
+                scaleY = 1f - (1f - 68f / 112f) * collectionProgress
+            }
         })
     }
 }

@@ -45,7 +45,8 @@ fun BlackjackNavHost(
                     // Le modèle doit accepter la distribution avant d'ouvrir la table.
                     if (gameViewModel.startGame()) openTable()
                 },
-                onResume = { openTable() }
+                onResume = { openTable() },
+                onResetBalance = { gameViewModel.resetBalance() }
             )
         }
         composable(BlackjackDestination.GAME) {

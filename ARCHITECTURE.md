@@ -1,8 +1,18 @@
 # Blackjack Android — architecture actuelle et guide de démonstration
 
-Mise à jour : 13 octobre 2026. Ce résumé décrit le code présent dans l’espace de travail local.
+Mise à jour : 15 octobre 2026. Ce résumé décrit le code et les vérifications consignés dans l’espace de travail.
 
-> **État de la remise Git vérifié le 13 octobre 2026 :** la branche locale `main` et `origin/main` pointent toutes deux vers `004ab1d` (`Ajoute les ViewModels, le jeu et le solde persistant`). Le clone de ce commit compile, mais ne contient pas les changements locaux décrits ici. L’espace de travail comporte 42 fichiers suivis modifiés et 7 nouveaux fichiers non suivis; rien n’a été commité ni poussé. L’enseignant ne verra donc pas encore la version décrite dans ce document.
+> **État Git vérifié le 15 octobre 2026 :** la branche locale `main` et la référence locale `origin/main` pointent vers `4bfbe0d` (`Improve blackjack table and history UX`). L’espace de travail contient des modifications non commitées dans la documentation, le classeur et l’écran Statistiques avec ses ressources bilingues. Cette vérification ne contacte pas GitHub et ne confirme donc pas l’état distant actuel.
+
+## Vérifications actuelles — 15 octobre 2026
+
+- `:app:assembleDebug` et `:app:assembleDebugAndroidTest` réussissent.
+- `:app:testDebugUnitTest` exécute 108 tests; les 108 réussissent, sans échec ni erreur.
+- Sur l’émulateur `Pixel_8` (`emulator-5554`), le parcours Split qui couvre les deux mains, le règlement, l’historique et les statistiques réussit en paysage. Il réussit aussi en portrait lors d’une relance ciblée; la première tentative portrait a expiré en attendant la mise à jour des statistiques.
+- Une exécution complète de la suite Android a été annulée par le pilote après quatre tests terminés; un cinquième était en cours. Aucun échec n’était rapporté avant l’annulation, mais aucun résultat global n’est disponible.
+- Le test ciblé `NavigationInstrumentedTest.homeToTableAndBack` a échoué en paysage parce qu’il ne trouvait pas l’écran Mise attendu après le premier clic. Il faut relancer ce scénario avec un état de test isolé pour déterminer si les données persistantes laissées sur l’émulateur influencent le parcours.
+
+**PB-15 reste en cours.** Les compilations et les tests unitaires sont vérifiés; le parcours Split a été vérifié dans les deux orientations. La suite instrumentée complète et les scénarios de navigation et d’états impossibles doivent encore être achevés dans un environnement de test propre. Aucune Sprint Review tenue en classe n’est attestée par ces résultats techniques.
 
 ## Résumé de l’architecture actuelle
 
@@ -74,15 +84,15 @@ Pour expliquer le Split en une phrase : « Le bouton envoie un événement au Vi
 Pour exécuter le parcours complet et déterministe du Split sur un Pixel 8 connecté :
 
 ```powershell
-$env:ANDROID_SERIAL = "emulator-5556"
+$env:ANDROID_SERIAL = "emulator-5554"
 .\gradlew.bat :app:connectedDebugAndroidTest --offline --no-configuration-cache --console=plain "-Pandroid.testInstrumentationRunnerArguments.class=com.example.blackjack.GameplayUiInstrumentedTest#splitJourneySettlesBothResultsAndUpdatesHistoryAndStatistics"
 ```
 
-Le test utilise des cartes ordonnées et une base Room en mémoire. Il vérifie la seconde mise, les tours des deux mains, des résultats différents, le paiement unique, l’historique et les statistiques. Il a réussi sur Pixel 8 en portrait et en paysage. Les tests unitaires complets ont réussi. Les validations instrumentées ciblées de navigation/retour, rotation, mises impossibles et persistance ont aussi réussi. La suite instrumentée totale compte 140 tests; une tentative a été interrompue à 10/140 sans résultat global. Ne pas présenter les 140 comme tous réussis.
+Le test utilise des cartes ordonnées et une base Room en mémoire. Il vérifie la seconde mise, les tours des deux mains, des résultats différents, le paiement unique, l’historique et les statistiques. Le 15 octobre 2026, ce test a réussi sur `Pixel_8` en paysage et en portrait lors d’une relance ciblée. Pour imposer le paysage, ajouter `"-Pandroid.testInstrumentationRunnerArguments.orientation=landscape"` à la commande. Les 108 tests unitaires réussissent. La suite instrumentée complète compte 140 tests; une exécution a été annulée après quatre tests terminés, pendant un cinquième. Aucun résultat global n’est disponible. PB-15 reste en cours; consulter la section « Vérifications actuelles » avant de présenter les résultats.
 
 ## Situation de la remise
 
-Le dépôt configuré est `https://github.com/oceane-talla/Blackjack.git`. Une lecture de `origin/main` puis une compilation du clone temporaire ont confirmé que le commit `004ab1d` compile (`:app:assembleDebug` réussi), mais cette copie ne contient pas le travail récent. La version locale doit être compilée et revue, puis les fichiers voulus doivent être commités et poussés avant que l’enseignant puisse les consulter. Aucun commit ni push n’a été fait dans cette préparation.
+Le dépôt configuré est `https://github.com/oceane-talla/Blackjack.git`. La branche locale `main` correspond à la référence locale `origin/main` au commit `4bfbe0d`. L’état distant n’a pas été vérifié pendant la mise à jour de cette documentation. Le classeur du backlog porte des modifications locales; aucun commit ni push n’a été effectué dans cette étape.
 
 ---
 

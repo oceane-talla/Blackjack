@@ -78,6 +78,16 @@
     <string name="red_cards">Red cards</string>
     <string name="black_cards">Black cards</string>
     <string name="card_statistic">%1$s · %2$s %%</string>
+    <string name="balance_exhausted">Your balance is below the minimum bet of 1 chip.</string>
+    <string name="balance_reset_title">Insufficient balance</string>
+    <string name="balance_reset_confirmation">Restart with 1,000 chips? Your history will be kept, and your current bet retained.</string>
+    <string name="balance_reset_action">Restart with 1,000 chips</string>
+    <string name="balance_reset_confirm">Confirm</string>
+    <string name="balance_reset_failed">Unable to reset the balance. Try again.</string>
+    <string name="cancel">Cancel</string>
+    <string name="stat_category_header">Category</string>
+    <string name="stat_count_header">Count</string>
+    <string name="stat_share_header">Share (%)</string>
     <string name="home_rules">Shoe with 1 to 8 decks kept between rounds · Blackjack profit: 2 × your bet · Bet 1 to 100 chips</string>
     <string name="result_mixed">Mixed results</string>
     <string name="deck_count">Number of decks</string>

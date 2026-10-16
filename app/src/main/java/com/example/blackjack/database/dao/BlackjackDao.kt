@@ -34,10 +34,20 @@ interface BlackjackDao {
     @Query("UPDATE player_balance SET chips = chips + :chipChange WHERE id = 1")
     suspend fun applyChipChange(chipChange: Double): Int
 
+    @Query("UPDATE player_balance SET chips = 1000.0 WHERE id = 1")
+    suspend fun updateBalanceToInitial(): Int
+
     @Transaction
     suspend fun getOrCreateBalance(): Double {
         // IGNORE préserve le solde existant lors des prochains démarrages.
         insertInitialBalance(PlayerBalanceEntity())
+        return checkNotNull(getBalance())
+    }
+
+    @Transaction
+    suspend fun resetBalanceToInitial(): Double {
+        insertInitialBalance(PlayerBalanceEntity())
+        check(updateBalanceToInitial() == 1)
         return checkNotNull(getBalance())
     }
 

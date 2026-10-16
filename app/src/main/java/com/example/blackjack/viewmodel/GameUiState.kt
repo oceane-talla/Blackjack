@@ -13,11 +13,15 @@ enum class GameError {
     // La partie n'a pas pu continuer, par exemple si le sabot est vide.
     ROUND_INTERRUPTED,
     // Une sauvegarde intermédiaire ou finale a échoué; les actions attendent une reprise.
-    SAVE_FAILED
+    SAVE_FAILED,
+    // Une erreur pendant la remise à zéro doit rester visible et réessayable.
+    BALANCE_RESET_FAILED
 }
 
 // Données observées par Compose pour afficher l'écran de partie.
 data class GameUiState(
+    val roundId: Long = 0,
+    val discardedCardCount: Int = 0,
     // Solde du joueur : la variation nette est appliquée à la fin de la partie.
     val chips: Double = 1_000.0,
     // Empêche de jouer avec un solde provisoire pendant sa lecture dans Room.
@@ -61,13 +65,21 @@ data class GameUiState(
     // Identifiant retourné par Room ; null tant que la partie n'est pas sauvegardée.
     val savedGameId: Long? = null,
     // Erreur que l'écran pourra expliquer au joueur ; null signifie aucune erreur.
-    val error: GameError? = null
+    val error: GameError? = null,
+    // Indique que la remise à zéro du solde est en cours dans Room.
+    val isResettingBalance: Boolean = false
 ) {
     // Calculé à partir de l'état : interdit de changer la mise pendant le jeu
     // ou tant que la sauvegarde est en cours ou reste à réessayer.
     val canChangeBet: Boolean
         get() = !isLoadingBalance && error != GameError.BALANCE_LOAD_FAILED &&
             phase != GamePhase.PLAYER_TURN && phase != GamePhase.DEALER_TURN &&
+            !isSaving && !isResettingBalance && error != GameError.SAVE_FAILED
+
+    // Une mise minimale vaut 1 jeton; proposer le redémarrage seulement hors d'un tour.
+    val canResetBalance: Boolean
+        get() = chips < 1.0 && !isLoadingBalance && error != GameError.BALANCE_LOAD_FAILED &&
+            phase in listOf(GamePhase.READY, GamePhase.FINISHED, GamePhase.INTERRUPTED) &&
             !isSaving && error != GameError.SAVE_FAILED
 
     // Autorise une nouvelle tentative après un échec, sans sauvegardes simultanées.

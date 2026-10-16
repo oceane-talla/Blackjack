@@ -55,6 +55,40 @@ class GameViewModel internal constructor(
         }
     }
 
+    // Appelé seulement après confirmation à l'écran; le nouveau solde est persisté dans Room.
+    fun resetBalance() {
+        val state = _uiState.value
+        if (!state.canResetBalance || state.isResettingBalance) return
+
+        _uiState.value = state.copy(
+            isResettingBalance = true,
+            canStartGame = false,
+            error = null
+        )
+        viewModelScope.launch {
+            try {
+                val chips = repository.resetBalance()
+                val updatedState = _uiState.value
+                _uiState.value = updatedState.copy(
+                    chips = chips,
+                    isResettingBalance = false,
+                    canStartGame = game.phase in listOf(
+                        GamePhase.READY, GamePhase.FINISHED, GamePhase.INTERRUPTED
+                    ) && game.validateBet(updatedState.selectedBet, chips),
+                    error = null
+                )
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: Exception) {
+                Log.e("GameViewModel", "Failed to reset the chip balance.", exception)
+                _uiState.value = _uiState.value.copy(
+                    isResettingBalance = false,
+                    error = GameError.BALANCE_RESET_FAILED
+                )
+            }
+        }
+    }
+
     // Attend le solde et la partie sauvegardée avant d'autoriser les actions.
     private fun loadBalance() {
         _uiState.value = _uiState.value.copy(isLoadingBalance = true, canStartGame = false, error = null)
@@ -194,6 +228,11 @@ class GameViewModel internal constructor(
         val hideDealerCard = game.phase == GamePhase.PLAYER_TURN
         _uiState.value = state.copy(
             isLoadingBalance = false,
+            roundId = startedAt,
+            // Les cartes encore sur la table ne rejoignent la défausse qu'en fin de partie.
+            discardedCardCount = (gameDeckCount * 52 - shoe.remainingCards -
+                if (finished) 0 else game.dealerCards.size + game.playerHands.sumOf { it.cards.size })
+                .coerceAtLeast(0),
             chips = chips,
             playerCards = game.playerCards,
             playerHands = game.playerHands,

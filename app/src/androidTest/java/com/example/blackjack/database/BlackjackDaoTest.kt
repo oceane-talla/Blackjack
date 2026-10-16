@@ -10,6 +10,7 @@ import com.example.blackjack.database.dao.BlackjackDao
 import com.example.blackjack.database.entity.DrawnCardEntity
 import com.example.blackjack.database.entity.GameEntity
 import com.example.blackjack.database.entity.HandEntity
+import com.example.blackjack.database.entity.PlayerBalanceEntity
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
@@ -53,6 +54,14 @@ class BlackjackDaoTest {
         assertTrue(dao.observeHistory().first().isEmpty())
         assertTrue(dao.getHands(42).isEmpty())
         assertTrue(dao.getDrawnCards(42).isEmpty())
+    }
+
+    @Test
+    fun resetBalanceRestoresOneThousandChips() = runBlocking {
+        dao.insertInitialBalance(PlayerBalanceEntity(chips = 0.0))
+
+        assertEquals(1_000.0, dao.resetBalanceToInitial(), 0.0)
+        assertEquals(1_000.0, dao.getBalance()!!, 0.0)
     }
 
     @Test

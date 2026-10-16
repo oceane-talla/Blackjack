@@ -14,7 +14,7 @@
     <string name="bet_description">Choisissez votre mise et de 1 à 8 paquets. Le sabot est renouvelé si moins de 4 cartes restent ou si le nombre de paquets change.</string>
     <string name="open_table">Distribuer les cartes</string>
     <string name="game_title">La table</string>
-    <string name="discard_title">Défausse</string>
+    <string name="discard_title">Discard</string>
     <string name="game_description">Approchez de 21 sans le dépasser. Le croupier reste à 17 ou plus.</string>
     <string name="dealer">Croupier</string>
     <string name="player">Joueur</string>
@@ -78,6 +78,9 @@
     <string name="red_cards">Cartes rouges</string>
     <string name="black_cards">Cartes noires</string>
     <string name="card_statistic">%1$s · %2$s %%</string>
+    <string name="stat_category_header">Catégorie</string>
+    <string name="stat_count_header">Nombre</string>
+    <string name="stat_share_header">Part (%)</string>
     <string name="home_rules">Sabot de 1 à 8 paquets conservé entre les parties · Gain du Blackjack : 2 × la mise · Mise de 1 à 100 jetons</string>
     <string name="result_mixed">Résultats mixtes</string>
     <string name="deck_count">Nombre de paquets</string>
@@ -86,4 +89,11 @@
     <string name="loading_balance">Chargement du solde…</string>
     <string name="balance_load_failed">Impossible de charger votre solde. Réessayez avant de jouer.</string>
     <string name="retry_balance_load">Recharger le solde</string>
+    <string name="balance_exhausted">Votre solde est inférieur à la mise minimale de 1 jeton.</string>
+    <string name="balance_reset_title">Solde insuffisant</string>
+    <string name="balance_reset_confirmation">Recommencer avec 1 000 jetons ? Votre historique sera conservé et votre mise actuelle gardée.</string>
+    <string name="balance_reset_action">Recommencer avec 1 000 jetons</string>
+    <string name="balance_reset_confirm">Confirmer</string>
+    <string name="balance_reset_failed">Impossible de réinitialiser le solde. Réessayez.</string>
+    <string name="cancel">Annuler</string>
 </resources>

@@ -327,6 +327,26 @@ class GameplayUiInstrumentedTest {
         rule.onNodeWithTag("deal_button").assertIsEnabled()
     }
 
+    @Test fun exhaustedBalanceCanBeConfirmedFromHomeAndKeepsTheSelectedBet() = runBlocking {
+        database.blackjackDao().insertInitialBalance(PlayerBalanceEntity(chips = 0.0))
+        showGame()
+
+        assertTrue(game.uiState.value.canResetBalance)
+        rule.onNodeWithTag("new_game_fab").assertIsEnabled().performClick()
+        rule.onNodeWithTag("reset_balance_button").performScrollTo().assertIsDisplayed().performClick()
+        rule.onNodeWithText(text(R.string.balance_reset_confirmation)).assertIsDisplayed()
+        rule.onNodeWithText(text(R.string.balance_reset_confirm)).performClick()
+
+        rule.waitUntil(10_000) {
+            !game.uiState.value.isResettingBalance && game.uiState.value.chips == 1_000.0
+        }
+        assertEquals(1, game.uiState.value.selectedBet)
+        assertTrue(game.uiState.value.canStartGame)
+        assertEquals(1_000.0, runBlocking { database.blackjackDao().getBalance()!! }, 0.0)
+        rule.onNodeWithTag("chip_1").performScrollTo().assertIsEnabled()
+        rule.onNodeWithTag("deal_button").assertIsEnabled()
+    }
+
     private fun text(id: Int) = instrumentation.targetContext.getString(id)
 
     // Captures pour contrôler visuellement les deux orientations, sans données personnelles.

@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,7 +25,31 @@ import kotlin.math.roundToInt
 
 @Composable
 fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount: (Int) -> Unit, onOpenTable: () -> Unit,
-    onResume: () -> Unit, onRetryBalanceLoad: () -> Unit, modifier: Modifier = Modifier) {
+    onResume: () -> Unit, onRetryBalanceLoad: () -> Unit, onResetBalance: () -> Unit,
+    modifier: Modifier = Modifier) {
+    var showBalanceResetDialog by rememberSaveable { mutableStateOf(false) }
+    if (showBalanceResetDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!state.isResettingBalance) showBalanceResetDialog = false },
+            title = { Text(stringResource(R.string.balance_reset_title)) },
+            text = { Text(stringResource(R.string.balance_reset_confirmation)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBalanceResetDialog = false
+                        onResetBalance()
+                    },
+                    enabled = !state.isResettingBalance
+                ) { Text(stringResource(R.string.balance_reset_confirm)) }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showBalanceResetDialog = false },
+                    enabled = !state.isResettingBalance
+                ) { Text(stringResource(R.string.cancel)) }
+            }
+        )
+    }
     ScreenContent(
         title = stringResource(R.string.bet_title),
         description = stringResource(R.string.bet_description),
@@ -38,7 +66,18 @@ fun BetScreen(state: GameUiState, onSelectBet: (Int) -> Unit, onSelectDeckCount:
             ValueRow(stringResource(R.string.balance), chipText(state.chips))
             ValueRow(stringResource(R.string.bet), state.selectedBet.toString())
             ValueRow(stringResource(R.string.deck_count), state.selectedDeckCount.toString())
-            if (state.canChangeBet) {
+            if (state.canResetBalance) {
+                Text(stringResource(R.string.balance_exhausted))
+                Button(
+                    onClick = { showBalanceResetDialog = true },
+                    enabled = !state.isResettingBalance,
+                    modifier = Modifier.fillMaxWidth().testTag("reset_balance_button")
+                ) { Text(stringResource(R.string.balance_reset_action)) }
+                if (state.isResettingBalance) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (state.error == GameError.BALANCE_RESET_FAILED) {
+                    Text(stringResource(R.string.balance_reset_failed), color = MaterialTheme.colorScheme.error)
+                }
+            } else if (state.canChangeBet) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(onClick = { onSelectDeckCount(state.selectedDeckCount - 1) },
                         enabled = state.selectedDeckCount > 1,

@@ -59,6 +59,20 @@ class BlackjackRepositoryTest {
     }
 
     @Test
+    fun resetBalanceIsPersistedWithoutDeletingTheHistory() = runBlocking {
+        repository.loadBalance()
+        val game = gameWith(Rank.TEN, Rank.TEN, Rank.NINE, Rank.EIGHT)
+        game.startRound()
+        game.stand()
+        repository.saveFinishedGame(game, bet = 10)
+        database.blackjackDao().applyChipChange(-1_000.0)
+
+        assertEquals(1_000.0, repository.resetBalance(), 0.0)
+        assertEquals(1_000.0, repository.loadBalance(), 0.0)
+        assertEquals(1, repository.observeHistory().first().size)
+    }
+
+    @Test
     fun completedGameIsConvertedAndSavedWithEveryCardInGlobalOrder() = runBlocking {
         val game = gameWith(Rank.SEVEN, Rank.TEN, Rank.SEVEN, Rank.SIX, Rank.FOUR, Rank.SIX)
         game.startRound()

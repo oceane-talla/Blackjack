@@ -32,6 +32,9 @@ class BlackjackRepository(private val dao: BlackjackDao) {
     // Lecture au démarrage, sans exposer le DAO au ViewModel.
     suspend fun loadBalance(): Double = dao.getOrCreateBalance()
 
+    // La remise à zéro passe par Room et conserve l'historique des parties.
+    suspend fun resetBalance(): Double = dao.resetBalanceToInitial()
+
     // La lecture est cohérente : le DAO regroupe la partie et ses trois listes dans une transaction.
     // Lecture des données brutes; restoreGameProgress() fournit les objets reconstruits.
     suspend fun loadGameProgress(): GameProgress? = dao.loadGameProgress()

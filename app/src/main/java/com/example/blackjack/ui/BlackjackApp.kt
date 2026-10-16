@@ -62,11 +62,13 @@ fun BlackjackApp(gameViewModel: GameViewModel, historyViewModel: HistoryViewMode
     val fabLabel = when {
         gameState.isLoadingBalance -> R.string.loading_balance
         resumeRound -> R.string.resume_game
+        gameState.canResetBalance -> R.string.balance_reset_action
         else -> R.string.new_game
     }
     val fabEnabled = !gameState.isLoadingBalance &&
         gameState.error != GameError.BALANCE_LOAD_FAILED &&
-        (resumeRound || gameState.canStartGame)
+        (resumeRound || gameState.canStartGame || gameState.canResetBalance) &&
+        !gameState.isResettingBalance
     val onFabClick: () -> Unit = if (resumeRound) {
         { navController.navigate(BlackjackDestination.GAME) { launchSingleTop = true } }
     } else {

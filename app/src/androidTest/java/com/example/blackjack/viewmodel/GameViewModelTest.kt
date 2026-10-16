@@ -11,6 +11,7 @@ import com.example.blackjack.database.dao.BlackjackDao
 import com.example.blackjack.database.entity.DrawnCardEntity
 import com.example.blackjack.database.entity.GameEntity
 import com.example.blackjack.database.entity.HandEntity
+import com.example.blackjack.database.entity.PlayerBalanceEntity
 import com.example.blackjack.database.entity.ShoeCardEntity
 import com.example.blackjack.model.BlackjackGame
 import com.example.blackjack.model.Card
@@ -75,6 +76,30 @@ class GameViewModelTest {
         assertTrue(state.dealerCards.isEmpty())
         assertNull(state.result)
         assertNull(state.savedGameId)
+    }
+
+    @Test
+    fun exhaustedBalanceAfterLossCanBeResetWhileKeepingTheBetAndHistory() = runBlocking {
+        database.blackjackDao().insertInitialBalance(PlayerBalanceEntity(chips = 1.0))
+        createViewModel { gameWith(Rank.TEN, Rank.NINE, Rank.SIX, Rank.EIGHT) }
+        onMain {
+            assertTrue(viewModel.selectBet(1))
+            assertTrue(viewModel.startGame())
+        }
+        awaitIdle()
+        onMain { assertTrue(viewModel.stand()) }
+        val lostGame = awaitSaved()
+        assertEquals(0.0, lostGame.chips, 0.0)
+        assertTrue(lostGame.canResetBalance)
+
+        onMain { viewModel.resetBalance() }
+        val resetState = withTimeout(10_000) {
+            viewModel.uiState.first { !it.isResettingBalance && it.chips == 1_000.0 }
+        }
+        assertEquals(1, resetState.selectedBet)
+        assertTrue(resetState.canStartGame)
+        assertEquals(1_000.0, repository.loadBalance(), 0.0)
+        assertEquals(1, repository.observeHistory().first().size)
     }
 
     @Test
@@ -535,6 +560,35 @@ class GameViewModelTest {
             assertFalse(viewModel.selectDeckCount(2))
             assertEquals(8, viewModel.uiState.value.selectedDeckCount)
         }
+    }
+
+    @Test
+    fun discardAccumulatesAcrossRoundsAndClearsWithANewShoe() = runBlocking {
+        onMain {
+            viewModel = GameViewModel(repository,
+                createShoe = { decks ->
+                    // Tirage par la fin : joueur 20, croupier 17, aucune pige supplémentaire.
+                    Shoe(List(13 * decks) {
+                        listOf(Rank.EIGHT, Rank.TEN, Rank.NINE, Rank.TEN)
+                            .map { Card(it, Suit.SPADES) }
+                    }.flatten())
+                }, createGame = { BlackjackGame(it) })
+            store.put("game", viewModel)
+        }
+        withTimeout(10_000) { viewModel.uiState.first { !it.isLoadingBalance } }
+        repeat(2) { round ->
+            onMain { assertTrue(viewModel.startGame()) }
+            awaitIdle()
+            assertEquals(round * 4, viewModel.uiState.value.discardedCardCount)
+            onMain { assertTrue(viewModel.stand()) }
+            assertEquals((round + 1) * 4, awaitSaved().discardedCardCount)
+        }
+        onMain {
+            assertTrue(viewModel.selectDeckCount(2))
+            assertTrue(viewModel.startGame())
+        }
+        awaitIdle()
+        assertEquals(0, viewModel.uiState.value.discardedCardCount)
     }
 
     @Test
